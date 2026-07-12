@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+_work/
+_lib_cache/
+logs/*.jsonl
+.env
+*.kicad_pcb-bak

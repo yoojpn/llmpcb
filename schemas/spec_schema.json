@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLMPCB Structured Spec",
+  "description": "Interviewerエージェントが会話から抽出する構造化スペック。Designerエージェントの入力になる。",
+  "type": "object",
+  "required": ["function_summary", "power", "board"],
+  "properties": {
+    "function_summary": {
+      "type": "string",
+      "description": "基板の目的・機能を簡潔に記述(例: 土壌水分検知+LED通知)"
+    },
+    "power": {
+      "type": "object",
+      "required": ["source", "voltage_v"],
+      "properties": {
+        "source": {"type": "string", "enum": ["usb", "battery", "external_adapter", "unknown"]},
+        "voltage_v": {"type": "number"},
+        "notes": {"type": "string"}
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "description": "例: soil_moisture_sensor, button, temperature_sensor"},
+          "interface": {"type": "string", "description": "例: analog, i2c, spi, digital_gpio"}
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "description": "例: led, buzzer, oled_display"},
+          "interface": {"type": "string"}
+        }
+      }
+    },
+    "mcu_preference": {
+      "type": "string",
+      "description": "指定があれば部品名(例: RP2040, ATtiny85, ESP32-C3)。なければunspecified"
+    },
+    "board": {
+      "type": "object",
+      "required": ["size_mm", "mounting_holes"],
+      "properties": {
+        "size_mm": {
+          "type": "object",
+          "properties": {
+            "width": {"type": "number"},
+            "height": {"type": "number"}
+          }
+        },
+        "layer_count": {"type": "integer", "default": 2},
+        "mounting_holes": {
+          "type": "object",
+          "properties": {
+            "count": {"type": "integer"},
+            "position": {"type": "string", "enum": ["corner", "custom", "none"]},
+            "diameter_mm": {"type": "number", "default": 3.2}
+          }
+        },
+        "enclosure": {"type": "string", "description": "既製ケース使用の有無・型番があれば記載"}
+      }
+    },
+    "risk_scope_check": {
+      "type": "object",
+      "description": "初期スコープ外の要求(バッテリー直結大電流、AC電源等)が含まれていないかのフラグ",
+      "properties": {
+        "out_of_scope": {"type": "boolean"},
+        "reason": {"type": "string"}
+      }
+    },
+    "user_notes_raw": {
+      "type": "string",
+      "description": "ユーザーの元の発言をそのまま保持(後工程でのニュアンス参照用)"
+    }
+  }
+}

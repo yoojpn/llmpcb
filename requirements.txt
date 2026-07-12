@@ -1,0 +1,7 @@
+google-genai>=0.3.0
+skidl>=1.2.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+pypdf>=5.0.0
+easyeda2kicad>=1.0.0
+pytest>=8.0.0

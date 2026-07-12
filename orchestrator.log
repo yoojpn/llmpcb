@@ -1,0 +1,296 @@
+WARNING: KICAD_SYMBOL_DIR environment variable is missing, so the default KiCad symbol libraries won't be searched. @ [/home/claude/llmpcb/<frozen importlib._bootstrap_external>:995=>/home/claude/llmpcb/<frozen importlib._bootstrap>:488]
+WARNING: KICAD6_SYMBOL_DIR environment variable is missing, so the default KiCad symbol libraries won't be searched. @ [/home/claude/llmpcb/<frozen importlib._bootstrap_external>:995=>/home/claude/llmpcb/<frozen importlib._bootstrap>:488]
+WARNING: KICAD7_SYMBOL_DIR environment variable is missing, so the default KiCad symbol libraries won't be searched. @ [/home/claude/llmpcb/<frozen importlib._bootstrap_external>:995=>/home/claude/llmpcb/<frozen importlib._bootstrap>:488]
+WARNING: KICAD8_SYMBOL_DIR environment variable is missing, so the default KiCad symbol libraries won't be searched. @ [/home/claude/llmpcb/<frozen importlib._bootstrap_external>:995=>/home/claude/llmpcb/<frozen importlib._bootstrap>:488]
+WARNING: KICAD9_SYMBOL_DIR environment variable is missing, so the default KiCad symbol libraries won't be searched. @ [/home/claude/llmpcb/<frozen importlib._bootstrap_external>:995=>/home/claude/llmpcb/<frozen importlib._bootstrap>:488]
+WARNING: fp-lib-table file was not found. Component footprints are not available.
+WARNING: fp-lib-table file was not found. Component footprints are not available.
+WARNING: fp-lib-table file was not found. Component footprints are not available.
+WARNING: fp-lib-table file was not found. Component footprints are not available.
+ERROR: Unable to find part NE555 in library /home/claude/llmpcb/_work/parts/Timer.kicad_sym. @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:22]
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag WJiJhxtsg6 generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag y70tiVQ46S generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag 1n0TnfukXo generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag Zk79p8iFFf generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag 5K6UTRMqyx generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag tyRrzDJhKw generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag PIQxGz318E generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 19 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag WiaB3EBMvu generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag qJdpfv4EmZ generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag 6WsjtiP81W generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag Y79ImRjrOJ generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag CVq0lfp4pj generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag ncNofJwKLb generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag mSzWqI978M generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 34 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag vzspS8PRre generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag TgkNaNusxq generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag H0TauXj4HC generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag b5FhjxCocN generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag 4w2lluVFA3 generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag 2BsXnprwZa generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag 9qIgsunxMD generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 49 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: KiCad ERC found issues in ./orchestrator.kicad_sch:
+ @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:31]
+INFO: Schematic written to ./orchestrator.kicad_sch @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:31]
+INFO: 50 warnings found while generating schematic.
+INFO: 0 errors found while generating schematic.
+
+WARNING: Routing failed on attempt 1/2, expanding area by 1.5x:  @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:31]
+WARNING: Routing failed on attempt 2/2, expanding area by 1.5x:  @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:31]
+WARNING: Routing failed on attempt 1/2, expanding area by 1.5x:  @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:42]
+WARNING: Routing failed on attempt 2/2, expanding area by 1.5x:  @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:42]
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag uLdx7Kt2hN generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag QVY9qjIQcr generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag Dl6RLQInIv generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag 9m0IQ2nudK generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag G1xR2_xMRL generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag WPOE_8GEUk generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag YltT7zuNUG generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag qvksGmN0BT generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag kV4ERX1SwT generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag D7fEJUIpWD generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag W2nbfHLpsA generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag smQKC9DnXC generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag N4qWPZMhel generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag bv4uYoJteR generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag zJD490PZID generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag UdT8vNiRg6 generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag GbFouYuaPk generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag _ijXfD9LSm generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag aRCdHm6e_g generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag iATMy5ceJ8 generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag rSMKOYKdgG generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag IzVHITzNf5 generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag LvmE_lHf3k generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag 48wYWi4C1q generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag nzG9vyNMCY generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag jCK21Y2gex generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag ZrlFo2QrOH generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag 3Q6A9CX2yz generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag bYoltxVqkB generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag EPDO1x_3Nw generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag QUcJP9RAab generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag Ld913L7NBK generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag hYpt_3me5P generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag njSUpMGUd_ generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag Ct5eajVIq4 generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag 6cBZQadXck generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag ikAIUutzkY generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag 8oJZ6nPjtt generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag 4GEzARFJzU generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag V5j5GxMcCc generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag lToUjf4y0F generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag 2TBAEVidLV generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 134 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Routing failed on attempt 1/2, expanding area by 1.5x:  @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:39]
+WARNING: Routing failed on attempt 2/2, expanding area by 1.5x:  @ [/home/claude/llmpcb/agents/orchestrator.py:294=>/home/claude/llmpcb/<string>:39]
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag qRSPfQ0RkC generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag qzWogOGwyv generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag NAGrzw3D2n generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag dbd7RCnoc2 generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag urD14YAsM0 generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag 95eu23GO4D generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag 6oLvxIT8AJ generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag eyPfYZw1rW generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag OPOXMqIB2X generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag LTbPyJPm1b generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag GLreCITJBD generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag nc6YAf9kT0 generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag SruyFEZpZs generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag zLmUOmaqud generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 163 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag A9DMZW_Vsw generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag LONFITfflR generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag PTaZSMQ5BR generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag Vy4dScLsHu generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag kwF2pPZ4Gy generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag haKdm6Ex_P generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag eJcJKs275S generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag WnNGDqffhO generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag f0EibYoMBP generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag hq7l_ATPlB generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag 5DTnnWbalX generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag cLyoyM6p1I generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag NKmaqIc2kP generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag xUpgOu0xUt generated for LED.
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag GYUBWc6UH9 generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag Zq4X6LLA3d generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag SC57DLSOLx generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag w7bBzcj8JI generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag 4P9cgBz036 generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag bYGYQwY9K_ generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag vk9sXnansM generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 206 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:11.
+WARNING: Random tag zCWTpQTmRU generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:12.
+WARNING: Random tag 7782f4BT9e generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:13.
+WARNING: Random tag 9KZMvK2dpE generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag KD0Yo1Fg7D generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag DpR2qS0_lT generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag LjQ_09Em7f generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag NL80hjptBx generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 221 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:14.
+WARNING: Random tag VEEXJGShKN generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag CVizyzSJnW generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag chB_NizNrq generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag C3twPgT_Jp generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag EuhFi7X7o1 generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:19.
+WARNING: Random tag i52l7eu2U8 generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:20.
+WARNING: Random tag 6yLkpWaxqC generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 236 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
+WARNING: Missing tag on NE555P instantiated at /home/claude/llmpcb/<string>:15.
+WARNING: Random tag hXxRRjJxHG generated for NE555P.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:16.
+WARNING: Random tag w5e_KOP_Xc generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:17.
+WARNING: Random tag 6ApKzvwv2a generated for R.
+WARNING: Missing tag on R instantiated at /home/claude/llmpcb/<string>:18.
+WARNING: Random tag N5NpBx35zo generated for R.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:19.
+WARNING: Random tag Qzhm3mO1Bj generated for C.
+WARNING: Missing tag on C instantiated at /home/claude/llmpcb/<string>:20.
+WARNING: Random tag zNBdd0TQmK generated for C.
+WARNING: Missing tag on LED instantiated at /home/claude/llmpcb/<string>:21.
+WARNING: Random tag ehoGy48rLx generated for LED.
+WARNING: Missing tag on  instantiated at /home/claude/llmpcb/<frozen importlib._bootstrap>:488.
+INFO: 251 warnings found while generating netlist.
+INFO: 0 errors found while generating netlist.
+
