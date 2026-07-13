@@ -1,0 +1,17 @@
+ERC WARNING: Only one pin (POWER-IN pin 8/VCC of NE555P/U1) attached to net VCC.
+ERC WARNING: No drivers for net VCC.
+ERC WARNING: Insufficient drive current on net VCC for pin POWER-IN pin 8/VCC of NE555P/U1.
+ERC WARNING: Only one pin (POWER-IN pin 1/GND of NE555P/U1) attached to net GND.
+ERC WARNING: No drivers for net GND.
+ERC WARNING: Insufficient drive current on net GND for pin POWER-IN pin 1/GND of NE555P/U1.
+ERC WARNING: Unconnected pin: INPUT pin 4/~{RST} of NE555P/U1.
+ERC WARNING: Unconnected pin: INPUT pin 7/DISCH of NE555P/U1.
+ERC WARNING: Unconnected pin: INPUT pin 6/THRES of NE555P/U1.
+ERC WARNING: Unconnected pin: INPUT pin 2/TRIG of NE555P/U1.
+ERC WARNING: Unconnected pin: OPEN-COLLECTOR pin 5/CONT of NE555P/U1.
+ERC WARNING: Unconnected pin: OUTPUT pin 3/OUT of NE555P/U1.
+ERC WARNING: Unconnected pin: PASSIVE pin 1/~ of R/R1.
+ERC WARNING: Unconnected pin: PASSIVE pin 2/~ of R/R1.
+ERC INFO: 14 warnings found while running ERC.
+ERC INFO: 0 errors found while running ERC.
+

@@ -161,6 +161,20 @@ def generate_schematic(skidl_code: str, output_name: str) -> dict:
                 found_net_path = candidates[0]
 
         success = proc.returncode == 0 and found_net_path is not None
+        erc_error_count = None
+        if success:
+            # SKiDL's ERC() (auto-inserted above if the Designer omitted
+            # it) prints "N errors found while generating netlist" but
+            # does NOT raise an exception or affect the process return
+            # code -- a script with real ERC errors (e.g. a pin left
+            # genuinely unconnected, drive conflicts) was previously still
+            # reported as success=True as long as generate_netlist() ran.
+            # Parse that line and treat any nonzero error count as failure.
+            error_counts = [int(x) for x in re.findall(r"(\d+) errors? found while (?:generating netlist|running ERC)", proc.stdout + proc.stderr)]
+            if error_counts:
+                erc_error_count = sum(error_counts)
+                if erc_error_count > 0:
+                    success = False
         nan_detected = False
         if success:
             # A value like float('nan') silently propagating into a
@@ -181,7 +195,12 @@ def generate_schematic(skidl_code: str, output_name: str) -> dict:
             "stdout": proc.stdout[-4000:],
             "stderr": proc.stderr[-6000:] if len(proc.stderr) <= 10000 else (proc.stderr[:2000] + "\n...(middle omitted)...\n" + proc.stderr[-4000:]),
             "part_name_corrections": part_name_corrections or None,
-            "error": "netlist contains a literal 'nan' value -- a calculation used to set a component value produced NaN. Check any duty-cycle/timing/log-based calculations for invalid inputs (e.g. log of zero or negative) before assigning the result." if nan_detected else None,
+            "error": (
+                "netlist contains a literal 'nan' value -- a calculation used to set a component value produced NaN. Check any duty-cycle/timing/log-based calculations for invalid inputs (e.g. log of zero or negative) before assigning the result."
+                if nan_detected else
+                f"SKiDL's ERC() reported {erc_error_count} error(s) -- check stdout/stderr for details (common cause: accessing a pin name/number that doesn't exist on that part, e.g. part['WRONG_NAME'] returning None, then crashing or silently failing to connect on the next line)."
+                if erc_error_count else None
+            ),
         }
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "timeout after 60s"}

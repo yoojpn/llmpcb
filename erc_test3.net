@@ -1,0 +1,109 @@
+(export 
+  (version "D")
+  (design
+    (source "erc_test3.py")
+    (date "07/13/2026 04:58 AM")
+    (tool "SKiDL (2.2.3)")
+    (sheet
+      (number 1)
+      (name "/")
+      (tstamps "/")
+      (title_block
+        (title)
+        (company)
+        (rev)
+        (date)
+        (source "../erc_test3.py")
+        (comment
+          (number "1")
+          (value ""))
+        (comment
+          (number "2")
+          (value ""))
+        (comment
+          (number "3")
+          (value ""))
+        (comment
+          (number "4")
+          (value ""))
+        (comment
+          (number "5")
+          (value ""))
+        (comment
+          (number "6")
+          (value ""))
+        (comment
+          (number "7")
+          (value ""))
+        (comment
+          (number "8")
+          (value ""))
+        (comment
+          (number "9")
+          (value "")))))
+  (components
+    (comp
+      (ref "R1")
+      (value "1k")
+      (description "Resistor")
+      (footprint "Resistor_SMD:R_0805_2012Metric")
+      (fields
+        (field
+          (name "Description") "Resistor")
+        (field
+          (name "Footprint") "Resistor_SMD:R_0805_2012Metric")
+        (field
+          (name "Datasheet") "~")
+        (field
+          (name "SKiDL Tag") "SlbXHn4eml")
+        (field
+          (name "SKiDL Line") "erc_test3.py:5"))
+      (libsource
+        (lib "Device")
+        (part "R"))
+      (sheetpath
+        (names "/")
+        (tstamps "/"))
+      (component_classes)
+      (tstamps "355115ac-beb7-5f71-be4f-5e57ffed64dd"))
+    (comp
+      (ref "U1")
+      (value "NE555P")
+      (description "Precision Timers, 555 compatible, PDIP-8")
+      (footprint "Package_DIP:DIP-8_W7.62mm")
+      (fields
+        (field
+          (name "Description") "Precision Timers, 555 compatible, PDIP-8")
+        (field
+          (name "Footprint") "Package_DIP:DIP-8_W7.62mm")
+        (field
+          (name "Datasheet") "http://www.ti.com/lit/ds/symlink/ne555.pdf")
+        (field
+          (name "SKiDL Tag") "kqI0vmmMlC")
+        (field
+          (name "SKiDL Line") "erc_test3.py:4"))
+      (libsource
+        (lib "Timer")
+        (part "NE555P"))
+      (sheetpath
+        (names "/")
+        (tstamps "/"))
+      (component_classes)
+      (tstamps "c3d678e1-c2c7-59f7-b282-7a9b70bb3a0a")))
+  (nets
+    (net
+      (code 1)
+      (name "GND")
+      (class "Default")
+      (node
+        (ref "U1")
+        (pin "1")
+        (pintype "POWER-IN")))
+    (net
+      (code 2)
+      (name "VCC")
+      (class "Default")
+      (node
+        (ref "U1")
+        (pin "8")
+        (pintype "POWER-IN")))))
