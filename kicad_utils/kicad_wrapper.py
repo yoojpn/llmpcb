@@ -705,9 +705,24 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
                 fp = footprints_by_ref.get(ref)
                 if fp is None:
                     continue
-                pad = fp.FindPadByNumber(str(pin_num))
-                if pad is not None:
-                    pad.SetNet(net_info)
+                # Some footprints (QFN/QFP modules with an exposed thermal
+                # pad, e.g. ESP32) split one logical pin into MANY physical
+                # sub-pads that all share the same pad number (KiCad's
+                # convention for thermal/ground pad arrays -- often 20+
+                # sub-pads for solder-paste-stencil reasons). FindPadByNumber
+                # only returns the FIRST match, which left every other
+                # sub-pad net-less -- DRC correctly flagged this as both an
+                # unconnected item and a short (the unconnected copper
+                # islands sit directly adjacent to the one properly-netted
+                # sub-pad). Assign the net to EVERY sub-pad sharing that
+                # number, not just the first one found.
+                matched = False
+                for pad in fp.Pads():
+                    if pad.GetNumber() == str(pin_num):
+                        pad.SetNet(net_info)
+                        matched = True
+                if not matched:
+                    pass  # pin not found on this footprint; leave unconnected (surfaces via DRC)
 
         # Auto-relax the board's minimum-hole-size design rule to match
         # whatever the actual placed parts need, rather than leaving
