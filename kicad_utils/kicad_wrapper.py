@@ -299,8 +299,23 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
         # design with a huge sandbox board, then use that measured size
         # directly (plus the standard margin baked into required_*_mm
         # already) as the real board size.
-        probe = generate_pcb_layout(
+        # Oversized dry-run pass: first, with an unconstrained width (500mm)
+        # get a rough estimate of total footprint area (no wrapping means
+        # required_width there is just the sum of every part's width in one
+        # row -- not usable directly as a board size, but its area is a
+        # reasonable estimate of total component area). Use that to pick a
+        # sensible width for a SECOND dry run that actually wraps rows,
+        # producing a real achievable shape.
+        area_probe = generate_pcb_layout(
             netlist_path, 500.0, 500.0, mounting_holes, footprint_search_dirs,
+            part_clearance_mm, hole_keepout_margin_mm,
+        )
+        if not area_probe.get("success"):
+            return area_probe
+        rough_total_area = area_probe["required_width_mm"] * area_probe["required_height_mm"]
+        probe_width = max(rough_total_area ** 0.5, 20.0)
+        probe = generate_pcb_layout(
+            netlist_path, probe_width, 500.0, mounting_holes, footprint_search_dirs,
             part_clearance_mm, hole_keepout_margin_mm,
         )
         if not probe.get("success"):
