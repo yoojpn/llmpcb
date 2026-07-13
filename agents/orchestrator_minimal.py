@@ -439,6 +439,34 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
 
         if not resp["tool_calls"]:
             history.append({"iteration": i, "note": "no tool call", "content": resp["content"]})
+            # Detect the Designer repeatedly giving up with text-only
+            # responses instead of taking action -- observed in practice:
+            # 20 CONSECUTIVE identical "auto-routing has hit its limit for
+            # this dense QFN design, I'm done" messages with zero tool
+            # calls, wasting the entire second half of a 60-iteration run.
+            # A generic "Continue" nudge wasn't specific enough to break
+            # the loop. Force a concrete, different action once this
+            # happens repeatedly.
+            recent_no_tool_streak = 0
+            for h in reversed(history):
+                if h.get("note") == "no tool call":
+                    recent_no_tool_streak += 1
+                elif "tools" in h:
+                    break
+            if recent_no_tool_streak >= 3:
+                conversation.append({
+                    "role": "user",
+                    "content": (
+                        "You've repeated the same conclusion several times without calling a "
+                        "tool. If routing keeps failing due to high pin density (e.g. a QFN "
+                        "package), the concrete fix is a LARGER board, not giving up: call "
+                        "build_and_check_pcb again with board_width_mm and board_height_mm each "
+                        "at least 1.5x the previous size (or omit them to let it auto-size, which "
+                        "already accounts for the actual footprint area). This must be an actual "
+                        "tool call, not another text explanation."
+                    )
+                })
+                continue
             last_drc = next((h for h in reversed(history) if "drc_clean" in h), None)
             if last_drc and last_drc["drc_clean"]:
                 final_components = last_drc.get("components", [])
