@@ -145,7 +145,14 @@ datasheet -- KiCad ships symbols for most standard connectors with
 correct, documented pins. If search_footprint_library DID return a
 datasheet_url (from LCSC, alongside a real symbol), you already have both
 pin data (from the symbol) and the datasheet if you need electrical specs
--- no separate search_reference_design call is needed for that same part."""
+-- no separate search_reference_design call is needed for that same part.
+
+For board_width_mm/board_height_mm on the first build_and_check_pcb call,
+estimate a roughly SQUARE board (width close to height, not a long thin
+strip) sized for the number and size of components -- e.g. for ~10 small
+THT/SMD passives plus one IC and one connector, try something like 40x40mm
+as a starting point, not a narrow strip. A board that's much longer than
+it is wide usually means the width was set too small for the parts."""
 
 
 def _interview_if_needed(user_request: str, client) -> str:
