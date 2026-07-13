@@ -189,6 +189,33 @@ def generate_schematic(skidl_code: str, output_name: str) -> dict:
             if re.search(r'\bnan\b', netlist_text, re.IGNORECASE):
                 nan_detected = True
                 success = False
+        pin_name_hint = None
+        if not success and "'NoneType' and 'Net'" in proc.stderr:
+            # This specific TypeError means `part['WRONG_PIN']` returned
+            # None (the pin name/number doesn't exist) and the next `+=`
+            # crashed. Rather than let the Designer keep guessing variant
+            # names one at a time (observed: RESET, RST, RESET all failing
+            # in a row for what turned out to be '~{RST}'), find which
+            # variable the failing line references and look up its actual
+            # pin names to hand back directly.
+            m = re.search(r'^\s*(\w+)\[[\'"]([^\'"]+)[\'"]\]\s*\+=', proc.stderr, re.MULTILINE)
+            if m:
+                var_name, bad_pin = m.groups()
+                var_m = re.search(rf'^\s*{re.escape(var_name)}\s*=\s*Part\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']', skidl_code, re.MULTILINE)
+                if var_m:
+                    lib_or_path, part_name = var_m.groups()
+                    try:
+                        import skidl as _skidl
+                        p = _skidl.Part(lib_or_path, part_name)
+                        pin_names = [pin.name for pin in p.pins]
+                        pin_name_hint = (
+                            f"'{var_name}[\"{bad_pin}\"]' failed because '{bad_pin}' is not a real pin "
+                            f"name/number on {part_name}. Its ACTUAL pin names are: {pin_names}. "
+                            f"Use the exact name from this list (note: some use SKiDL's inverted-logic "
+                            f"notation like '~{{RST}}' rather than plain 'RESET')."
+                        )
+                    except Exception:
+                        pass
         return {
             "success": success,
             "netlist_path": str(found_net_path) if success else None,
@@ -198,6 +225,7 @@ def generate_schematic(skidl_code: str, output_name: str) -> dict:
             "error": (
                 "netlist contains a literal 'nan' value -- a calculation used to set a component value produced NaN. Check any duty-cycle/timing/log-based calculations for invalid inputs (e.g. log of zero or negative) before assigning the result."
                 if nan_detected else
+                pin_name_hint if pin_name_hint else
                 f"SKiDL's ERC() reported {erc_error_count} error(s) -- check stdout/stderr for details (common cause: accessing a pin name/number that doesn't exist on that part, e.g. part['WRONG_NAME'] returning None, then crashing or silently failing to connect on the next line)."
                 if erc_error_count else None
             ),
