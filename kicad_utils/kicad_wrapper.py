@@ -249,6 +249,25 @@ def find_shorted_two_pin_parts(netlist_path: str) -> list[dict]:
     return shorted
 
 
+def get_netlist_nets(netlist_path: str) -> dict[str, list[tuple[str, str]]]:
+    """Parse the (nets ...) section of a netlist into {net_name: [(ref, pin), ...]}.
+    Used to actually assign electrical nets to pads on the PCB after
+    placement -- generate_pcb_layout previously only placed footprints
+    without ever connecting their pads to nets, which meant there was
+    nothing for an autorouter to route (0 unrouted nets) even though the
+    schematic-level netlist was fully connected.
+    """
+    import re
+    content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
+    net_section = content[content.find("(nets"):] if "(nets" in content else ""
+    nets = {}
+    for net_m in re.finditer(r'\(net\s*\(code \d+\)\s*\(name "([^"]+)"\)(.*?)(?=\(net\s*\(code|\Z)', net_section, re.DOTALL):
+        net_name, body = net_m.groups()
+        pins = re.findall(r'\(node\s*\(ref "([^"]+)"\)\s*\(pin "([^"]+)"\)', body)
+        nets[net_name] = pins
+    return nets
+
+
 def get_netlist_ref_values(netlist_path: str) -> list[dict]:
     """Lightweight extraction of (ref, value) pairs for every component in
     a netlist -- e.g. [{"ref": "U1", "value": "NE555P"}, {"ref": "D1",
@@ -499,6 +518,52 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
                     return True
             return False
 
+        # Edge-mount parts (connectors: USB, headers, JST, etc -- anything
+        # needing external physical access, e.g. a cable plugged in from
+        # outside the enclosure) get placed in a dedicated column along the
+        # LEFT edge of the board first. Placing them via the same
+        # shelf-packing pass as ordinary passives previously let them land
+        # in the middle of the board, which is physically impractical (you
+        # can't plug in a USB cable to a connector buried in the board's
+        # interior). Everything else is packed to the right of this column.
+        def _is_edge_connector(comp: dict) -> bool:
+            ref = comp.get("ref", "")
+            lib = (comp.get("footprint_lib") or "").lower()
+            return ref.startswith("J") or "connector" in lib
+
+        edge_comps = [c for c in components if _is_edge_connector(c)]
+        other_comps = [c for c in components if not _is_edge_connector(c)]
+
+        edge_col_width_mm = 0.0
+        edge_cursor_y = margin_mm
+        for comp in edge_comps:
+            fp_file = _find_footprint_file_for(comp["footprint_lib"], comp["footprint_name"], footprint_search_dirs)
+            if not fp_file:
+                missing.append(comp)
+                continue
+            libdir = os.path.dirname(fp_file)
+            fp_name_no_ext = os.path.basename(fp_file)[:-len(".kicad_mod")]
+            footprint = pcbnew.FootprintLoad(libdir, fp_name_no_ext)
+            if footprint is None:
+                missing.append(comp)
+                continue
+            bbox = footprint.GetBoundingBox()
+            fp_w = pcbnew.ToMM(bbox.GetWidth()) + part_clearance_mm
+            fp_h = pcbnew.ToMM(bbox.GetHeight()) + part_clearance_mm
+            footprint.SetReference(comp["ref"])
+            # x=0 anchors the connector body right at the board edge
+            # (margin_mm/2 in from the true edge for a little copper/silk
+            # clearance) so its externally-facing side is accessible.
+            footprint.SetPosition(pcbnew.VECTOR2I_MM(margin_mm / 2 + fp_w / 2, edge_cursor_y + fp_h / 2))
+            board.Add(footprint)
+            placed.append(comp["ref"])
+            edge_cursor_y += fp_h
+            edge_col_width_mm = max(edge_col_width_mm, fp_w)
+
+        cursor_x = margin_mm + edge_col_width_mm + (part_clearance_mm if edge_comps else 0.0)
+        cursor_y = margin_mm
+        components = other_comps
+
         for comp in components:
             fp_file = _find_footprint_file_for(comp["footprint_lib"], comp["footprint_name"], footprint_search_dirs)
             if not fp_file:
@@ -515,9 +580,9 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
             fp_w = pcbnew.ToMM(bbox.GetWidth()) + part_clearance_mm
             fp_h = pcbnew.ToMM(bbox.GetHeight()) + part_clearance_mm
 
-            if cursor_x + fp_w > board_width_mm - margin_mm and cursor_x > margin_mm:
+            if cursor_x + fp_w > board_width_mm - margin_mm and cursor_x > margin_mm + edge_col_width_mm:
                 # wrap to next row
-                cursor_x = margin_mm
+                cursor_x = margin_mm + edge_col_width_mm + (part_clearance_mm if edge_comps else 0.0)
                 cursor_y += row_height_mm
                 row_height_mm = 0.0
 
@@ -527,7 +592,7 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
             while _overlaps_any_hole(cursor_x, cursor_y, cursor_x + fp_w, cursor_y + fp_h) and guard < 20:
                 cursor_x += fp_w
                 if cursor_x + fp_w > board_width_mm - margin_mm:
-                    cursor_x = margin_mm
+                    cursor_x = margin_mm + edge_col_width_mm
                     cursor_y += max(row_height_mm, fp_h)
                     row_height_mm = 0.0
                 guard += 1
@@ -544,15 +609,30 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
             row_height_mm = max(row_height_mm, fp_h)
             max_x_used = max(max_x_used, cursor_x)
 
-        required_height_mm = cursor_y + row_height_mm + margin_mm
+        required_height_mm = max(cursor_y + row_height_mm + margin_mm, edge_cursor_y + margin_mm)
         required_width_mm = max_x_used + margin_mm
         board_too_small = (
             required_height_mm > board_height_mm or required_width_mm > board_width_mm
         )
 
-        # NOTE: trace routing between footprints is not implemented; DRC will
-        # report unrouted nets. Component placement/clearance/courtyard
-        # checks are meaningful, connectivity/routing checks are not yet.
+        # Assign electrical nets to pads based on the netlist -- without
+        # this, the board only has placed footprints with no connectivity
+        # information at all, meaning DRC's unconnected-item check and any
+        # autorouter would see "0 nets" (nothing to route or verify),
+        # silently hiding the fact that nothing is actually wired.
+        net_assignments = get_netlist_nets(netlist_path)
+        footprints_by_ref = {fp.GetReference(): fp for fp in board.GetFootprints()}
+        for net_name, pin_list in net_assignments.items():
+            net_info = pcbnew.NETINFO_ITEM(board, net_name)
+            board.Add(net_info)
+            for ref, pin_num in pin_list:
+                fp = footprints_by_ref.get(ref)
+                if fp is None:
+                    continue
+                pad = fp.FindPadByNumber(str(pin_num))
+                if pad is not None:
+                    pad.SetNet(net_info)
+
         board.Save(str(pcb_path))
         return {
             "success": True,
@@ -598,22 +678,86 @@ def run_drc_check(pcb_path: str) -> dict:
         return {"success": False, "error": "timeout after 60s"}
 
 
+_FREEROUTING_JAR = str(_PROJECT_ROOT / "_tools" / "freerouting.jar")
+
+
+def route_pcb(pcb_path: str, max_passes: int = 20, timeout_s: int = 90) -> dict:
+    """Auto-route the PCB's copper traces using Freerouting (headless CLI
+    mode, via the standard Specctra DSN/SES interchange format that KiCad's
+    own pcbnew Python API supports natively: ExportSpecctraDSN /
+    ImportSpecctraSES). Without this, "build_and_check_pcb" only places
+    components and checks physical/clearance rules -- it does NOT connect
+    any pins with copper, so a "DRC clean" board previously could still be
+    entirely unrouted. This closes that gap.
+    """
+    import subprocess
+    try:
+        import pcbnew  # type: ignore
+    except ImportError:
+        return {"success": False, "error": "pcbnew not available"}
+    if not os.path.exists(_FREEROUTING_JAR):
+        return {"success": False, "error": f"freerouting.jar not found at {_FREEROUTING_JAR}"}
+
+    pcb_path = str(pcb_path)
+    dsn_path = pcb_path.replace(".kicad_pcb", ".dsn")
+    ses_path = pcb_path.replace(".kicad_pcb", ".ses")
+
+    board = pcbnew.LoadBoard(pcb_path)
+    pcbnew.ExportSpecctraDSN(board, dsn_path)
+
+    try:
+        proc = subprocess.run(
+            [
+                "java", "-jar", _FREEROUTING_JAR,
+                "-de", dsn_path, "-do", ses_path,
+                "-mp", str(max_passes),
+                "--gui.enabled=false",
+            ],
+            capture_output=True, text=True, timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": f"freerouting did not finish within {timeout_s}s"}
+
+    if not os.path.exists(ses_path):
+        return {
+            "success": False,
+            "error": "freerouting did not produce a session file",
+            "stdout": proc.stdout[-2000:], "stderr": proc.stderr[-2000:],
+        }
+
+    board = pcbnew.LoadBoard(pcb_path)  # reload fresh; ImportSpecctraSES mutates in place
+    pcbnew.ImportSpecctraSES(board, ses_path)
+    board.Save(pcb_path)
+
+    return {"success": True, "pcb_path": pcb_path}
+
+
 def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_height_mm: float = None,
                          mounting_holes: list[dict] = None,
                          footprint_search_dirs: list[str] = None,
                          part_clearance_mm: float = 3.0,
-                         hole_keepout_margin_mm: float = 2.0) -> dict:
-    """Combine generate_pcb_layout + run_drc_check into a single tool call.
-    These two steps are always used together, so splitting them doubled the
-    number of round trips needed for no benefit. board_width_mm/
-    board_height_mm are optional -- see generate_pcb_layout's docstring.
+                         hole_keepout_margin_mm: float = 2.0,
+                         skip_routing: bool = False) -> dict:
+    """Combine generate_pcb_layout + route_pcb + run_drc_check into a
+    single tool call: place components, auto-route copper traces between
+    them (via Freerouting), then check the result. Previously this only
+    placed components and checked physical/clearance rules -- it never
+    actually connected any pins with copper, so "DRC clean" did not mean
+    the board was electrically complete. board_width_mm/board_height_mm
+    are optional -- see generate_pcb_layout's docstring. skip_routing=True
+    bypasses the auto-router (e.g. for quick placement-only iteration).
     """
     layout_result = generate_pcb_layout(
         netlist_path, board_width_mm, board_height_mm, mounting_holes, footprint_search_dirs,
         part_clearance_mm=part_clearance_mm, hole_keepout_margin_mm=hole_keepout_margin_mm,
     )
     if not layout_result.get("success"):
-        return {"layout": layout_result, "drc": None}
+        return {"layout": layout_result, "routing": None, "drc": None}
+
+    routing_result = None
+    if not skip_routing:
+        routing_result = route_pcb(layout_result["pcb_path"])
+
     drc_result = run_drc_check(layout_result["pcb_path"])
     shorted = find_shorted_two_pin_parts(netlist_path)
     if shorted and drc_result:
@@ -635,7 +779,7 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
                     f"Fix the SKiDL connections so each pin goes to a DIFFERENT net."
                 ),
             })
-    return {"layout": layout_result, "drc": drc_result}
+    return {"layout": layout_result, "routing": routing_result, "drc": drc_result}
 
 
 def build_and_simulate_schematic(skidl_code: str, output_name: str,
