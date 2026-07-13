@@ -9,6 +9,7 @@ once this baseline is confirmed to work.
 """
 from __future__ import annotations
 import os
+import gc
 import sys
 import json
 from pathlib import Path
@@ -586,6 +587,18 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             "iteration": i, "tools": [r["name"] for r in results],
             "results": _bound_result_sizes(results),
         })
+
+        # pcbnew (KiCad's SWIG-wrapped C++ Python bindings) allocates
+        # BOARD/FOOTPRINT objects on nearly every tool call in this loop
+        # (generate_pcb_layout, route_pcb, run_drc_check) that were found
+        # NOT to be released by Python's normal refcounting -- confirmed
+        # by measurement: conversation itself was only ~25KB at iteration
+        # 21 while process RSS had already grown past 1GB, ruling out
+        # conversation/history growth as the cause. Force a GC pass each
+        # iteration as a pragmatic mitigation for the underlying
+        # SWIG-object retention rather than chasing the exact leak inside
+        # the pcbnew C++ bindings themselves.
+        gc.collect()
 
     return {
         "resolved": False,

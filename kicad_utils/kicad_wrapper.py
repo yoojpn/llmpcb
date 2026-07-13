@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 import re
+import gc
 import subprocess
 import json
 from pathlib import Path
