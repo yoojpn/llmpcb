@@ -540,7 +540,29 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                 })
 
         conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}"})
-        history.append({"iteration": i, "tools": [r["name"] for r in results], "results": results})
+        # Store a SIZE-BOUNDED summary of results in history, not the raw
+        # output -- a run that hit an out-of-memory kill at iteration 55
+        # (process RSS grew from ~700MB at iteration 8 to 3.7GB, exceeding
+        # the 3.9GB system limit) traced back to this line: `results`
+        # includes full datasheet excerpts and other large tool outputs,
+        # appended to `history` (a plain Python list kept in memory for
+        # the whole run) on every single iteration with no size cap at
+        # all, unlike the full orchestrator which has offload/compression
+        # mechanisms. This keeps history usable for debugging without the
+        # unbounded growth.
+        def _bound_result_sizes(obj, max_len=500):
+            if isinstance(obj, str):
+                return obj if len(obj) <= max_len else obj[:max_len] + f"...({len(obj)} chars total)"
+            if isinstance(obj, dict):
+                return {k: _bound_result_sizes(v, max_len) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_bound_result_sizes(v, max_len) for v in obj]
+            return obj
+
+        history.append({
+            "iteration": i, "tools": [r["name"] for r in results],
+            "results": _bound_result_sizes(results),
+        })
 
     return {
         "resolved": False,
