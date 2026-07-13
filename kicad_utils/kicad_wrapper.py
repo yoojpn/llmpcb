@@ -288,6 +288,62 @@ def run_spice_simulation(netlist: str, analysis_type: str = "dc",
         return {"success": False, "error": "timeout after 60s"}
 
 
+def find_unconnected_usb_c_cc_pins(netlist_path: str) -> list[dict]:
+    """USB-C receptacles require CC1/CC2 to each have their own pull-down
+    resistor to GND (per the USB-C spec) -- without this, most modern
+    USB-C power sources will not apply VBUS at all, since the CC
+    termination is how a sink identifies itself as safe to power. This
+    exact omission was the real-world Raspberry Pi 4B launch bug (tying
+    CC1/CC2 together instead of separate resistors). Found via manual
+    datasheet-trace audit: a generated RP2040 board left CC1/CC2 entirely
+    unconnected, which neither DRC/ERC nor find_shorted_two_pin_parts (a
+    different failure mode -- component present but doing nothing, not a
+    genuinely missing net) would catch, since there's no violation at all
+    from KiCad's perspective -- an unused pin simply isn't flagged.
+    """
+    import re
+    content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
+    # ref -> which pin numbers are actually used in any net
+    nets = get_netlist_nets(netlist_path)
+    used_pins_by_ref: dict[str, set] = {}
+    for pin_list in nets.values():
+        for ref, pin_num in pin_list:
+            used_pins_by_ref.setdefault(ref, set()).add(pin_num)
+
+    # ref -> component's symbol/part name, to identify USB-C connectors
+    ref_to_part = {}
+    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\).*?\(value "([^"]*)"\)', content, re.DOTALL):
+        ref_to_part[m.group(1)] = m.group(2)
+
+    issues = []
+    for ref, part_name in ref_to_part.items():
+        if not re.search(r"usb.?c|type.?c|usb4085|usb31|usb32", part_name, re.IGNORECASE):
+            continue
+        # Find this part's symbol file to get real pin name->number mapping
+        for sym_file in (Path(netlist_path).parent / "parts").glob("*.kicad_sym"):
+            sym_text = sym_file.read_text(encoding="utf-8", errors="ignore")
+            if f'(symbol "{part_name}"' not in sym_text and part_name not in sym_text:
+                continue
+            cc_pins = dict(re.findall(r'\(name "(CC[12])"[^\n]*\n\s*\(number "([^"]+)"', sym_text))
+            if not cc_pins:
+                continue
+            used = used_pins_by_ref.get(ref, set())
+            missing = [name for name, num in cc_pins.items() if num not in used]
+            if missing:
+                issues.append({
+                    "ref": ref, "part": part_name, "missing_cc_pins": missing,
+                    "note": (
+                        f"{ref} ({part_name}) is a USB-C connector but pins {missing} "
+                        f"(CC1/CC2) are not connected to anything. Each CC pin needs its OWN "
+                        f"5.1kOhm resistor to GND (never share one resistor between them -- "
+                        f"that was the real Raspberry Pi 4B launch bug) or most modern USB-C "
+                        f"chargers/hosts will refuse to apply VBUS at all."
+                    ),
+                })
+            break
+    return issues
+
+
 def find_shorted_multipin_ic_gpios(netlist_path: str, ref_values: list[dict] = None) -> list[dict]:
     """Detect a distinct wiring mistake from find_shorted_two_pin_parts:
     a multi-pin IC/MCU (not a simple 2-terminal part) with two or more of
@@ -949,6 +1005,7 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
 
     drc_result = run_drc_check(layout_result["pcb_path"])
     shorted = find_shorted_two_pin_parts(netlist_path)
+    usb_c_cc_issues = find_unconnected_usb_c_cc_pins(netlist_path)
     if shorted and drc_result:
         # These are real functional bugs (a component wired to do nothing)
         # that standard DRC/ERC don't catch -- fold them into the DRC
@@ -967,6 +1024,22 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
                     f"with both ends on the same rail is not actually in the current path). "
                     f"Fix the SKiDL connections so each pin goes to a DIFFERENT net."
                 ),
+            })
+    if usb_c_cc_issues and drc_result:
+        # Unlike find_shorted_multipin_ic_gpios (below), this is a
+        # specific, unambiguous omission (USB-C CC pins entirely
+        # unconnected) with no legitimate reason to leave it that way --
+        # found via manual datasheet-trace audit on a real generated
+        # RP2040 board. Block completion the same way as a real DRC
+        # violation, since a board built this way would very likely not
+        # power on at all from most modern USB-C sources.
+        drc_result["violation_count"] = drc_result.get("violation_count", 0) + len(usb_c_cc_issues)
+        drc_result.setdefault("violations", [])
+        for s in usb_c_cc_issues:
+            drc_result["violations"].append({
+                "type": "usb_c_cc_unconnected",
+                "severity": "error",
+                "description": s["note"],
             })
 
     # Unlike find_shorted_two_pin_parts (a deterministic bug -- a passive

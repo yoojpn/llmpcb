@@ -134,6 +134,13 @@ or any part of it -- these are different things (footprint_ref is a
 is the schematic symbol's name) and using the wrong one causes "Unable to
 find part X in library Y" even though the search itself succeeded.
 
+If using a USB-C connector, CC1 and CC2 pins each need their OWN 5.1kOhm
+resistor to GND (as separate, independent resistors -- never share one
+resistor between them, and never leave them unconnected). Without this,
+most modern USB-C power sources will not apply VBUS at all, since CC
+termination is how a sink identifies itself as safe to power (this exact
+omission was the real Raspberry Pi 4B launch bug).
+
 SKiDL connection syntax: `net += part[pin_number]` connects a Net to a
 specific pin by its NUMBER (an int or str like 1, "1", "VBUS") -- always
 index into the Part with [ ] to get a Pin object first. Never write
