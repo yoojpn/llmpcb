@@ -978,7 +978,56 @@ def route_pcb(pcb_path: str, max_passes: int = 20, timeout_s: int = 90) -> dict:
     return {"success": True, "pcb_path": pcb_path}
 
 
+def _mp_worker(fn_name, kwargs, queue):
+    import kicad_utils.kicad_wrapper as _self
+    fn = getattr(_self, fn_name)
+    try:
+        queue.put(fn(**kwargs))
+    except Exception as e:
+        queue.put({"success": False, "error": f"{type(e).__name__}: {e}"})
+
+
 def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_height_mm: float = None,
+                         mounting_holes: list[dict] = None,
+                         footprint_search_dirs: list[str] = None,
+                         part_clearance_mm: float = 3.0,
+                         hole_keepout_margin_mm: float = 2.0,
+                         skip_routing: bool = False) -> dict:
+    """Runs _build_and_check_pcb_impl in a disposable child process via
+    multiprocessing, rather than in-process. pcbnew's SWIG-wrapped C++
+    BOARD/FOOTPRINT objects were found (by direct measurement: process RSS
+    grew past 1GB by iteration 10-24 across multiple runs while the
+    conversation itself stayed under 30KB, and gc.collect() every
+    iteration did not meaningfully slow the growth) to not be released by
+    Python's normal reference counting or garbage collection. Running the
+    actual pcbnew work in a fresh child process each call guarantees the
+    OS reclaims ALL of that memory (leaked or not) when the child exits,
+    which is the standard mitigation for this class of C-extension leak
+    that can't be fixed from pure Python code calling into it.
+    """
+    import multiprocessing
+    kwargs = dict(
+        netlist_path=netlist_path, board_width_mm=board_width_mm, board_height_mm=board_height_mm,
+        mounting_holes=mounting_holes, footprint_search_dirs=footprint_search_dirs,
+        part_clearance_mm=part_clearance_mm, hole_keepout_margin_mm=hole_keepout_margin_mm,
+        skip_routing=skip_routing,
+    )
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    proc = ctx.Process(target=_mp_worker, args=("_build_and_check_pcb_impl", kwargs, queue))
+    proc.start()
+    proc.join(timeout=180)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join()
+        return {"layout": {"success": False, "error": "build_and_check_pcb child process timed out after 180s"}, "routing": None, "drc": None}
+    try:
+        return queue.get_nowait()
+    except Exception:
+        return {"layout": {"success": False, "error": "build_and_check_pcb child process produced no result (likely crashed)"}, "routing": None, "drc": None}
+
+
+def _build_and_check_pcb_impl(netlist_path: str, board_width_mm: float = None, board_height_mm: float = None,
                          mounting_holes: list[dict] = None,
                          footprint_search_dirs: list[str] = None,
                          part_clearance_mm: float = 3.0,
