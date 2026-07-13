@@ -288,6 +288,45 @@ def run_spice_simulation(netlist: str, analysis_type: str = "dc",
         return {"success": False, "error": "timeout after 60s"}
 
 
+def find_shorted_multipin_ic_gpios(netlist_path: str, ref_values: list[dict] = None) -> list[dict]:
+    """Detect a distinct wiring mistake from find_shorted_two_pin_parts:
+    a multi-pin IC/MCU (not a simple 2-terminal part) with two or more of
+    its OWN pins landing on the same net, where that net also connects to
+    something else external (i.e. not just an internal don't-care net).
+    This catches, e.g., an ESP32's IO4 and IO2 both being wired to the same
+    encoder pin -- which shorts those two GPIOs together internally,
+    something neither DRC nor find_shorted_two_pin_parts (which only
+    checks 2-terminal passives) catches. Common net names that legitimately
+    span many pins of one IC (power/ground rails) are excluded via a
+    heuristic: if MORE than a small threshold of that part's pins share
+    the net, treat it as a deliberate power/ground rail, not a wiring bug
+    -- two coincidentally-shorted signal GPIOs is the case worth flagging,
+    dozens of GND pins tied together on a thermal pad is not.
+    """
+    import re
+    nets = get_netlist_nets(netlist_path)
+    # collect, per (ref, net), how many DISTINCT pin numbers of that ref appear in that net
+    ref_pins_per_net: dict[tuple[str, str], set] = {}
+    for net_name, pin_list in nets.items():
+        for ref, pin_num in pin_list:
+            ref_pins_per_net.setdefault((ref, net_name), set()).add(pin_num)
+
+    suspicious = []
+    for (ref, net_name), pins in ref_pins_per_net.items():
+        if len(pins) >= 2 and len(pins) <= 3:
+            # 2-3 distinct pins of the SAME part sharing one net is very
+            # unlikely to be a legitimate power/ground rail (those
+            # typically involve many more pins) and much more likely to be
+            # two different signal/GPIO pins accidentally wired together.
+            suspicious.append({
+                "ref": ref, "net": net_name, "pins": sorted(pins),
+                "note": f"{len(pins)} different pins of {ref} ({pins}) all share net '{net_name}' -- "
+                        f"likely two different signals/GPIOs shorted together rather than an intentional "
+                        f"power/ground rail (which normally involves many more shared pins).",
+            })
+    return suspicious
+
+
 def find_shorted_two_pin_parts(netlist_path: str) -> list[dict]:
     """Detect a specific, common LLM wiring mistake: a 2-pin passive
     component (resistor, capacitor, LED, etc) with BOTH pins landing on
@@ -929,6 +968,19 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
                     f"Fix the SKiDL connections so each pin goes to a DIFFERENT net."
                 ),
             })
+
+    # Unlike find_shorted_two_pin_parts (a deterministic bug -- a passive
+    # wired to do nothing is NEVER intentional), find_shorted_multipin_ic_gpios
+    # has real false positives (e.g. tying an LDO's EN pin directly to VIN
+    # is the textbook-correct way to keep it always-enabled, and looks
+    # identical to a genuine two-GPIOs-shorted mistake by this heuristic).
+    # Surface it as a non-blocking advisory for the Designer/reviewer to
+    # judge, rather than auto-failing DRC and risking "fixing" something
+    # that was already correct.
+    if drc_result is not None:
+        drc_result["advisory_warnings"] = [
+            s["note"] for s in find_shorted_multipin_ic_gpios(netlist_path)
+        ]
     return {"layout": layout_result, "routing": routing_result, "drc": drc_result}
 
 

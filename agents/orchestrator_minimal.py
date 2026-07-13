@@ -275,21 +275,44 @@ def _extract_requirements(user_request: str, client) -> str:
     return resp.get("content") or ""
 
 
-def _verify_requirements(requirements: str, final_components: list[dict], client) -> tuple[bool, str]:
+def _verify_requirements(requirements: str, final_components: list[dict], client,
+                          netlist_path: str = None, advisory_warnings: list = None) -> tuple[bool, str]:
     """One-shot final check: does the ACTUAL component list (from the real
     generated netlist, not the model's memory of the conversation) satisfy
-    the requirements extracted at the start? Returns (passed, explanation).
+    the requirements extracted at the start? Also passes the actual net
+    connections and any advisory wiring warnings, so this check can catch
+    real wiring mistakes -- e.g. a rotary encoder's channel A accidentally
+    tied to two different MCU GPIOs simultaneously (shorting them), or a
+    required push-button function left completely unwired -- not just
+    "is the right component type present" (a part can be present and still
+    be wired wrong, as found via manual datasheet-trace audit in practice).
+    Returns (passed, explanation).
     """
     prompt = (
         "Compare this list of functional requirements against the ACTUAL "
-        "components in the final board (from the real generated netlist, "
-        "not memory). Reply with a short explanation, then end with exactly "
-        "one line: 'VERDICT: PASS' if every requirement is satisfied by an "
-        "actual component present, or 'VERDICT: FAIL' if anything is missing."
+        "components AND their actual net connections in the final board "
+        "(from the real generated netlist, not memory). Check not just "
+        "that the right component TYPES are present, but that they are "
+        "actually wired correctly for their stated purpose -- e.g. if a "
+        "rotary encoder is required, check its A/B/common pins each go to "
+        "a DIFFERENT net (not the same net as each other, and not shorted "
+        "to two different MCU pins simultaneously), and that any required "
+        "button/switch function has its pins actually connected to "
+        "something, not left floating. Advisory warnings (if any) flag "
+        "specific pins that may be shorted together -- use your judgment "
+        "on whether each is a real bug or a legitimate design pattern "
+        "(e.g. tying an LDO's EN pin to VIN to keep it always-enabled is "
+        "correct, not a bug). Reply with a short explanation, then end "
+        "with exactly one line: 'VERDICT: PASS' if everything is correct, "
+        "or 'VERDICT: FAIL' if a real problem is found."
     )
+    nets_info = kicad_wrapper.get_netlist_nets(netlist_path) if netlist_path else {}
     content = (
         f"Requirements:\n{requirements}\n\n"
-        f"Actual final components: {json.dumps(final_components, ensure_ascii=False)}"
+        f"Actual final components: {json.dumps(final_components, ensure_ascii=False)}\n\n"
+        f"Actual net connections: {json.dumps(nets_info, ensure_ascii=False)}\n\n"
+        f"Advisory warnings (may or may not be real bugs, use judgment): "
+        f"{json.dumps(advisory_warnings or [], ensure_ascii=False)}"
     )
     resp = client.call_interviewer(prompt, [{"role": "user", "content": content}])
     text = resp.get("content") or ""
@@ -333,7 +356,11 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             last_drc = next((h for h in reversed(history) if "drc_clean" in h), None)
             if last_drc and last_drc["drc_clean"]:
                 final_components = last_drc.get("components", [])
-                passed, explanation = _verify_requirements(requirements, final_components, client)
+                passed, explanation = _verify_requirements(
+                    requirements, final_components, client,
+                    netlist_path=last_drc.get("netlist_path"),
+                    advisory_warnings=last_drc.get("advisory_warnings"),
+                )
                 print(f"[LLMPCB] 機能要件の最終確認: {'PASS' if passed else 'FAIL'}")
                 history.append({"iteration": i, "requirement_check": passed, "explanation": explanation})
                 if passed:
@@ -409,6 +436,8 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     ),
                     "missing_footprint": missing_fp,
                     "components": ref_values,
+                    "netlist_path": netlist_path,
+                    "advisory_warnings": drc.get("advisory_warnings", []),
                 })
 
         conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}"})
