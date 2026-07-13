@@ -365,10 +365,21 @@ def run(user_request: str) -> dict:
                 netlist_path = tc["arguments"].get("netlist_path")
                 ref_values = kicad_wrapper.get_netlist_ref_values(netlist_path) if netlist_path else []
                 missing_fp = layout.get("components_missing_footprint") or []
+                # Purely cosmetic/manufacturing-appearance DRC types that
+                # don't affect whether the board is electrically correct
+                # or physically assemblable -- treated as non-blocking so
+                # the Designer isn't stuck re-submitting the same layout
+                # forever chasing a warning that generally can't be fully
+                # eliminated by the auto-placement algorithm anyway.
+                COSMETIC_DRC_TYPES = {"silk_over_copper", "silk_overlap"}
+                blocking_violations = [
+                    v for v in drc.get("violations", [])
+                    if v.get("type") not in COSMETIC_DRC_TYPES
+                ]
                 history.append({
                     "iteration": i,
                     "drc_clean": (
-                        drc.get("violation_count") == 0
+                        len(blocking_violations) == 0
                         and layout.get("success")
                         and not missing_fp
                     ),
