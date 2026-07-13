@@ -335,6 +335,18 @@ def run(user_request: str) -> dict:
                     )
                 })
                 continue
+            if last_drc and last_drc.get("missing_footprint"):
+                conversation.append({
+                    "role": "user",
+                    "content": (
+                        f"The following components have no footprint and were NOT physically "
+                        f"placed on the board, even though DRC may show 0 violations (DRC only "
+                        f"checks what IS placed): {last_drc['missing_footprint']}. Search for a "
+                        f"real footprint for each of these parts (search_footprint_library or "
+                        f"KiCad standard library), fix the SKiDL code, and rebuild."
+                    )
+                })
+                continue
             conversation.append({"role": "user", "content": "Continue -- call the next tool needed."})
             continue
 
@@ -352,9 +364,15 @@ def run(user_request: str) -> dict:
                 layout = out.get("layout") or {}
                 netlist_path = tc["arguments"].get("netlist_path")
                 ref_values = kicad_wrapper.get_netlist_ref_values(netlist_path) if netlist_path else []
+                missing_fp = layout.get("components_missing_footprint") or []
                 history.append({
                     "iteration": i,
-                    "drc_clean": drc.get("violation_count") == 0 and layout.get("success"),
+                    "drc_clean": (
+                        drc.get("violation_count") == 0
+                        and layout.get("success")
+                        and not missing_fp
+                    ),
+                    "missing_footprint": missing_fp,
                     "components": ref_values,
                 })
 
