@@ -100,7 +100,7 @@ TOOLS = [
                     "board_width_mm": {"type": "number"},
                     "board_height_mm": {"type": "number"},
                 },
-                "required": ["netlist_path", "board_width_mm", "board_height_mm"],
+                "required": ["netlist_path"],
             },
         },
     },
@@ -147,21 +147,16 @@ datasheet_url (from LCSC, alongside a real symbol), you already have both
 pin data (from the symbol) and the datasheet if you need electrical specs
 -- no separate search_reference_design call is needed for that same part.
 
-For board_width_mm/board_height_mm on the first build_and_check_pcb call,
-estimate a roughly SQUARE board (width close to height, not a long thin
-strip) sized for the number and size of components -- e.g. for ~10 small
-THT/SMD passives plus one IC and one connector, try something like 40x40mm
-as a starting point, not a narrow strip. A board that's much longer than
-it is wide usually means the width was set too small for the parts.
-
-If the user specified a maximum board size and the actual required size
-(from board_too_small/required_width_mm/required_height_mm) exceeds it
-even after a couple of retries, do NOT keep silently retrying the same
-size forever. State clearly in your response that the requested size
-cannot physically fit all components, report the actual minimum size
-needed, and either use smaller-footprint part variants (if available) or
-proceed with the smallest size that actually fits, explaining the
-tradeoff -- don't loop on an impossible constraint."""
+board_width_mm/board_height_mm are OPTIONAL on build_and_check_pcb -- if
+you omit them, the tool computes the actual required size itself and uses
+a reasonably-sized board automatically. Only pass explicit dimensions if
+the user specified a maximum board/enclosure size to check the design
+against. If the user's specified max size doesn't fit (compare against
+the returned required_width_mm/required_height_mm) even after a retry or
+two, do NOT keep looping -- state clearly that it doesn't fit, report the
+actual minimum size needed, and either use smaller-footprint part variants
+or proceed with the smallest size that actually fits, explaining the
+tradeoff."""
 
 
 def _interview_if_needed(user_request: str, client) -> str:

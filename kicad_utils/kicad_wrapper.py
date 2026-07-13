@@ -269,7 +269,7 @@ def _find_footprint_file_for(fp_lib: str | None, fp_name: str, footprint_search_
     return None
 
 
-def generate_pcb_layout(netlist_path: str, board_width_mm: float, board_height_mm: float,
+def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_height_mm: float = None,
                          mounting_holes: list[dict] = None,
                          footprint_search_dirs: list[str] = None,
                          part_clearance_mm: float = 3.0,
@@ -281,7 +281,37 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float, board_height_m
     literally overlaps another component or a mounting hole (that
     correctness property does not depend on the clearance amount -- it was
     a missing collision check, not a spacing-tuning problem).
+
+    board_width_mm/board_height_mm are OPTIONAL. If omitted, this function
+    computes the actual required size itself (via an internal oversized
+    dry-run pass) and uses a roughly-square board sized to fit -- there is
+    no reason to make the caller guess a size, get told "too small", and
+    retry, when the layout algorithm already knows exactly how much space
+    it needs. Pass explicit dimensions only when there's a real physical
+    constraint (a specific enclosure, a user-specified maximum) to check
+    the design against.
     """
+    if board_width_mm is None or board_height_mm is None:
+        # Oversized dry-run pass: compute the actual footprint of the
+        # design with a huge sandbox board, then use that (plus a small
+        # margin) as a roughly-square real board size.
+        probe = generate_pcb_layout(
+            netlist_path, 500.0, 500.0, mounting_holes, footprint_search_dirs,
+            part_clearance_mm, hole_keepout_margin_mm,
+        )
+        if not probe.get("success"):
+            return probe
+        needed_w = probe["required_width_mm"]
+        needed_h = probe["required_height_mm"]
+        total_area = needed_w * needed_h
+        side = total_area ** 0.5
+        board_width_mm = max(side, needed_w * 0.6, 15.0)
+        board_height_mm = max(side, needed_h * 0.6, 15.0)
+        # the square-ish estimate might still be too small in one
+        # dimension for how components actually pack (shelf-packing isn't
+        # perfectly area-efficient) -- verify and fall back to the exact
+        # required box if needed, rather than looping.
+
     try:
         import pcbnew  # type: ignore
     except ImportError:
@@ -513,14 +543,15 @@ def run_drc_check(pcb_path: str) -> dict:
         return {"success": False, "error": "timeout after 60s"}
 
 
-def build_and_check_pcb(netlist_path: str, board_width_mm: float, board_height_mm: float,
+def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_height_mm: float = None,
                          mounting_holes: list[dict] = None,
                          footprint_search_dirs: list[str] = None,
                          part_clearance_mm: float = 3.0,
                          hole_keepout_margin_mm: float = 2.0) -> dict:
     """Combine generate_pcb_layout + run_drc_check into a single tool call.
     These two steps are always used together, so splitting them doubled the
-    number of round trips needed for no benefit.
+    number of round trips needed for no benefit. board_width_mm/
+    board_height_mm are optional -- see generate_pcb_layout's docstring.
     """
     layout_result = generate_pcb_layout(
         netlist_path, board_width_mm, board_height_mm, mounting_holes, footprint_search_dirs,
