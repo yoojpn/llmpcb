@@ -206,7 +206,7 @@ def _interview_if_needed(user_request: str, client) -> str:
             h = input("縦幅(mm): ").strip()
             size_text = f"基板サイズは{w}x{h}mm以内に収めること。"
         else:
-            size_text = "基板サイズの指定なし。部品構成から適切なサイズ(できるだけ正方形に近い形)を提案すること。"
+            size_text = "基板サイズの指定なし。部品構成から必要な最小サイズを自動算出すること。"
         print(f"[LLMPCB] 基板サイズ: {size_text}\n")
         user_request = f"{user_request} {size_text}"
 
