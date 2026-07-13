@@ -93,13 +93,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "build_and_check_pcb",
-            "description": "Place components on a PCB of the given size and run DRC.",
+            "description": "Place components on a PCB of the given size and run DRC. If DRC reports a spacing-related violation between DIFFERENT components (clearance, solder_mask_bridge, courtyards_overlap) -- NOT a schematic/netlist issue -- increase part_clearance_mm and call this again; editing the SKiDL schematic code cannot fix physical placement spacing.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "netlist_path": {"type": "string"},
                     "board_width_mm": {"type": "number"},
                     "board_height_mm": {"type": "number"},
+                    "part_clearance_mm": {"type": "number", "description": "Minimum gap between placed components, default 3.0mm. Increase this (e.g. to 4-5mm) if DRC reports clearance/solder-mask/courtyard violations between different components."},
                 },
                 "required": ["netlist_path"],
             },
@@ -156,6 +157,15 @@ If build_and_check_pcb reports clearance violations, call it again with a
 LARGER board_width_mm/board_height_mm (e.g. +10mm) to give components more
 room -- do not just describe the problem in text, take the corrective
 action yourself.
+
+IMPORTANT: DRC violations between DIFFERENT components -- clearance,
+solder_mask_bridge, courtyards_overlap -- are PHYSICAL PLACEMENT issues,
+not schematic/netlist issues. Rewriting the SKiDL code and regenerating
+the schematic does NOT change where components are physically placed on
+the board and cannot fix these. Instead, call build_and_check_pcb again
+with a larger part_clearance_mm (e.g. 4-5mm instead of the 3mm default).
+Only edit the SKiDL schematic for genuinely electrical/connectivity
+problems (wrong pins, missing parts, wrong values).
 
 If search_footprint_library returns symbol_file: null (footprint found but
 no KiCad symbol/pin data) for a common/generic part (connector, header,
