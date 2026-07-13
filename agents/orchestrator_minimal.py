@@ -462,6 +462,18 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     )
                 })
                 continue
+            if last_drc and last_drc.get("routing_failed"):
+                conversation.append({
+                    "role": "user",
+                    "content": (
+                        "The board was placed and DRC-checked, but auto-routing (copper trace "
+                        "generation) did not complete -- the board has NO actual electrical "
+                        "connections between components yet, even though DRC reported 0 "
+                        "violations (there was nothing to check connectivity on). Call "
+                        "build_and_check_pcb again on the same netlist to retry routing."
+                    )
+                })
+                continue
             conversation.append({"role": "user", "content": "Continue -- call the next tool needed."})
             continue
 
@@ -489,6 +501,7 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             if tc["name"] == "build_and_check_pcb":
                 drc = out.get("drc") or {}
                 layout = out.get("layout") or {}
+                routing = out.get("routing") or {}
                 netlist_path = tc["arguments"].get("netlist_path")
                 ref_values = kicad_wrapper.get_netlist_ref_values(netlist_path) if netlist_path else []
                 missing_fp = layout.get("components_missing_footprint") or []
@@ -503,13 +516,23 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     v for v in drc.get("violations", [])
                     if v.get("type") not in COSMETIC_DRC_TYPES
                 ]
+                # A previous run reported "resolved: true" with a board
+                # that had ZERO copper traces and 40 unconnected items --
+                # routing had timed out (freerouting didn't finish within
+                # 90s), but DRC still reported violation_count=0 because
+                # nothing was routed yet for DRC to check connectivity on.
+                # routing.success must be true for the board to actually
+                # be considered done, not just DRC's violation count.
+                routing_ok = routing.get("success", False)
                 history.append({
                     "iteration": i,
                     "drc_clean": (
                         len(blocking_violations) == 0
                         and layout.get("success")
                         and not missing_fp
+                        and routing_ok
                     ),
+                    "routing_failed": (not routing_ok),
                     "missing_footprint": missing_fp,
                     "components": ref_values,
                     "netlist_path": netlist_path,
