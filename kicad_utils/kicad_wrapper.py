@@ -284,33 +284,29 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
 
     board_width_mm/board_height_mm are OPTIONAL. If omitted, this function
     computes the actual required size itself (via an internal oversized
-    dry-run pass) and uses a roughly-square board sized to fit -- there is
-    no reason to make the caller guess a size, get told "too small", and
+    dry-run pass) and uses that measured size directly -- there is no
+    reason to make the caller guess a size, get told "too small", and
     retry, when the layout algorithm already knows exactly how much space
-    it needs. Pass explicit dimensions only when there's a real physical
-    constraint (a specific enclosure, a user-specified maximum) to check
-    the design against.
+    it needs. There is no inherent reason to prefer a square aspect ratio
+    over whatever shape the shelf-packing placement actually needs; a
+    square-ification step was tried here previously and rejected as an
+    unfounded assumption. Pass explicit dimensions only when there's a
+    real physical constraint (a specific enclosure, a user-specified
+    maximum) to check the design against.
     """
     if board_width_mm is None or board_height_mm is None:
         # Oversized dry-run pass: compute the actual footprint of the
-        # design with a huge sandbox board, then use that (plus a small
-        # margin) as a roughly-square real board size.
+        # design with a huge sandbox board, then use that measured size
+        # directly (plus the standard margin baked into required_*_mm
+        # already) as the real board size.
         probe = generate_pcb_layout(
             netlist_path, 500.0, 500.0, mounting_holes, footprint_search_dirs,
             part_clearance_mm, hole_keepout_margin_mm,
         )
         if not probe.get("success"):
             return probe
-        needed_w = probe["required_width_mm"]
-        needed_h = probe["required_height_mm"]
-        total_area = needed_w * needed_h
-        side = total_area ** 0.5
-        board_width_mm = max(side, needed_w * 0.6, 15.0)
-        board_height_mm = max(side, needed_h * 0.6, 15.0)
-        # the square-ish estimate might still be too small in one
-        # dimension for how components actually pack (shelf-packing isn't
-        # perfectly area-efficient) -- verify and fall back to the exact
-        # required box if needed, rather than looping.
+        board_width_mm = probe["required_width_mm"]
+        board_height_mm = probe["required_height_mm"]
 
     try:
         import pcbnew  # type: ignore
@@ -318,14 +314,13 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
         return {"success": False, "error": "pcbnew not available"}
 
     if not os.path.exists(netlist_path):
-        if not os.path.exists(netlist_path):
-            candidates = sorted(WORKDIR.glob("*.net"), key=lambda p: p.stat().st_mtime, reverse=True)
-            hint = (
-                f" The most recently generated netlist file is: {candidates[0]}. "
-                f"Use that exact path (do not guess a filename that hasn't been generated yet)."
-                if candidates else " No netlist files exist yet -- call build_and_simulate_schematic first."
-            )
-            return {"success": False, "error": f"netlist file not found: {netlist_path}.{hint}"}
+        candidates = sorted(WORKDIR.glob("*.net"), key=lambda p: p.stat().st_mtime, reverse=True)
+        hint = (
+            f" The most recently generated netlist file is: {candidates[0]}. "
+            f"Use that exact path (do not guess a filename that hasn't been generated yet)."
+            if candidates else " No netlist files exist yet -- call build_and_simulate_schematic first."
+        )
+        return {"success": False, "error": f"netlist file not found: {netlist_path}.{hint}"}
 
     footprint_search_dirs = footprint_search_dirs or [str(_PROJECT_ROOT / "_work" / "parts")]
     pcb_path = WORKDIR / "design.kicad_pcb"
@@ -484,15 +479,6 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
         board_too_small = (
             required_height_mm > board_height_mm or required_width_mm > board_width_mm
         )
-        # The shelf-packing algorithm above produces a long thin strip when
-        # the requested width is much smaller than what's needed to fit
-        # everything in fewer rows (e.g. a 45x45mm request can still need
-        # 52x107mm because only ~1 row's worth of parts fit per pass).
-        # Suggest a roughly-square size based on total footprint area, so
-        # a caller retrying after board_too_small gets a sane target
-        # instead of just "make height bigger" (which keeps the strip shape).
-        total_area_mm2 = required_width_mm * required_height_mm
-        suggested_square_side_mm = round(total_area_mm2 ** 0.5, 1)
 
         # NOTE: trace routing between footprints is not implemented; DRC will
         # report unrouted nets. Component placement/clearance/courtyard
@@ -502,7 +488,6 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
             "success": True,
             "pcb_path": str(pcb_path),
             "mounting_holes_placed": len(mounting_holes or []),
-            "suggested_square_board_side_mm": suggested_square_side_mm if board_too_small else None,
             "components_placed": placed,
             "components_missing_footprint": [c["ref"] for c in missing],
             "board_too_small": board_too_small,
