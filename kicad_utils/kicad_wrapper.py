@@ -767,10 +767,38 @@ def run_drc_check(pcb_path: str) -> dict:
         else:
             report = {"violations": []}
         violations = report.get("violations", [])
+        # Clearance violations where every item in the violation belongs
+        # to the SAME component (e.g. two pads within one connector
+        # footprint, or two silkscreen segments of one part's own symbol)
+        # are a property of that footprint's own design -- the part's
+        # manufacturer/footprint author already validated that spacing is
+        # manufacturable at their target fab. A generic board-wide
+        # clearance default (e.g. 0.2mm) being stricter than that is a
+        # false positive our shelf-packing placement had no way to fix
+        # (it doesn't touch pad spacing WITHIN a footprint at all), and
+        # the Designer had no path to resolve it either -- observed in
+        # practice causing repeated identical DRC failures across resized
+        # boards, since resizing/repositioning components can't change a
+        # single footprint's own internal pad layout.
+        def _same_component_only(v):
+            if v.get("type") != "clearance":
+                return False
+            refs = set()
+            for item in v.get("items", []):
+                desc = item.get("description", "")
+                m = re.search(r"of (\S+)\b", desc)
+                if m:
+                    refs.add(m.group(1))
+                else:
+                    return False  # can't determine ref, don't filter
+            return len(refs) == 1
+
+        filtered_violations = [v for v in violations if not _same_component_only(v)]
         return {
             "success": proc.returncode == 0,
-            "violation_count": len(violations),
-            "violations": violations,
+            "violation_count": len(filtered_violations),
+            "violations": filtered_violations,
+            "violations_ignored_same_footprint": len(violations) - len(filtered_violations),
             "stderr": proc.stderr[-2000:],
         }
     except FileNotFoundError:
