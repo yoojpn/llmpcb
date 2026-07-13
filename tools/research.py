@@ -7,7 +7,10 @@ import os
 import re
 
 from .search_engine import web_search, fetch_page_text
-from .library_manager import download_symbol_and_footprint, find_lcsc_id, download_via_easyeda2kicad
+from .library_manager import (
+    download_symbol_and_footprint, find_lcsc_id, download_via_easyeda2kicad,
+    get_datasheet_url_from_lcsc,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_PARTS_DIR = str(_PROJECT_ROOT / "_work" / "parts")
@@ -104,6 +107,7 @@ class FootprintSearchResult:
     footprint_file: Optional[str] = None
     footprint_ref: Optional[str] = None  # canonical "LibName:FootprintName"
     candidates: Optional[list] = None  # similar real part names found, if any
+    datasheet_url: Optional[str] = None  # from the same LCSC page, when found via easyeda2kicad
     notes: Optional[str] = None
 
 
@@ -196,12 +200,17 @@ def search_footprint_library(part_number: str, manufacturer: str = "",
             fp_path, fp_ref = _canonicalize_footprint(
                 ez_result["footprint_file"], ez_result.get("footprint_ref"), dest_dir, lcsc_id
             )
+            # Same lcsc_id, same part -- get the datasheet directly from
+            # LCSC's own product page instead of a separate general web
+            # search for it later.
+            datasheet_url = get_datasheet_url_from_lcsc(lcsc_id)
             result = FootprintSearchResult(
                 found=True,
                 source=f"easyeda2kicad_lcsc_{lcsc_id}",
                 symbol_file=ez_result["symbol_file"],
                 footprint_file=fp_path,
                 footprint_ref=fp_ref,
+                datasheet_url=datasheet_url,
             ).__dict__
             _log_tool_call("search_footprint_library", {"part_number": part_number}, result)
             return result

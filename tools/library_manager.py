@@ -31,6 +31,26 @@ def find_lcsc_id(part_number: str, manufacturer: str = "") -> str | None:
     return None
 
 
+def get_datasheet_url_from_lcsc(lcsc_id: str) -> str | None:
+    """LCSC's own product page links directly to the manufacturer datasheet
+    PDF for that exact part. Since we already resolve an lcsc_id when
+    fetching a footprint via easyeda2kicad, reuse it here instead of doing
+    a separate general web search for the datasheet -- it's the same part,
+    same source, one fewer independent search.
+    """
+    import requests
+    try:
+        resp = requests.get(
+            f"https://www.lcsc.com/product-detail/{lcsc_id}.html",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException:
+        return None
+    m = re.search(r'(https?://datasheet\.lcsc\.com/datasheet/pdf/[^"\']+\.pdf)', resp.text)
+    return m.group(1) if m else None
+
+
 def download_via_easyeda2kicad(lcsc_id: str, dest_dir: str) -> dict:
     """Fetch symbol/footprint/3D model for a part via its LCSC ID using the
     easyeda2kicad CLI tool. Works without any authentication.

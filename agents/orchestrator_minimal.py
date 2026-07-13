@@ -24,6 +24,30 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_reference_design",
+            "description": "Find a part's datasheet URL and reference design info.",
+            "parameters": {
+                "type": "object",
+                "properties": {"part_number": {"type": "string"}, "manufacturer": {"type": "string"}, "doc_type": {"type": "string"}},
+                "required": ["part_number"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_and_extract_schematic_data",
+            "description": "Fetch a specific section (e.g. pin configuration, pinout) from a datasheet URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {"document_url": {"type": "string"}, "target_section": {"type": "string"}},
+                "required": ["document_url", "target_section"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_footprint_library",
             "description": "Find a real footprint/symbol for a specific manufacturer part number.",
             "parameters": {
@@ -84,6 +108,8 @@ TOOLS = [
 
 DISPATCH = {
     "search_footprint_library": research.search_footprint_library,
+    "search_reference_design": research.search_reference_design,
+    "fetch_and_extract_schematic_data": research.fetch_and_extract_schematic_data,
     "calc_led_resistor": calculators.calc_led_resistor,
     "build_and_simulate_schematic": kicad_wrapper.build_and_simulate_schematic,
     "build_and_check_pcb": kicad_wrapper.build_and_check_pcb,
@@ -96,11 +122,69 @@ build_and_simulate_schematic (SKiDL code -> netlist), build_and_check_pcb
 Use KiCad standard library (Part("Device", "R", footprint=...)) for plain
 resistors/capacitors/LEDs -- no search needed for those. Work efficiently:
 batch independent searches in one turn when possible. Aim to finish in as
-few turns as possible."""
+few turns as possible.
+
+SKiDL connection syntax: `net += part[pin_number]` connects a Net to a
+specific pin by its NUMBER (an int or str like 1, "1", "VBUS") -- always
+index into the Part with [ ] to get a Pin object first. Never write
+`net += some_number` or `net += some_float` directly; that is not a pin
+reference and will crash with "TypeError: 'float' object is not iterable".
+Check a connector's actual pin numbers/names from its footprint search
+result before wiring it, rather than guessing pin numbers.
+
+If build_and_check_pcb reports clearance violations, call it again with a
+LARGER board_width_mm/board_height_mm (e.g. +10mm) to give components more
+room -- do not just describe the problem in text, take the corrective
+action yourself.
+
+If search_footprint_library returns symbol_file: null (footprint found but
+no KiCad symbol/pin data) for a common/generic part (connector, header,
+etc), first check whether it already exists in KiCad's own standard
+libraries (Connector, Device, etc) before searching the web for a
+datasheet -- KiCad ships symbols for most standard connectors with
+correct, documented pins. If search_footprint_library DID return a
+datasheet_url (from LCSC, alongside a real symbol), you already have both
+pin data (from the symbol) and the datasheet if you need electrical specs
+-- no separate search_reference_design call is needed for that same part."""
+
+
+def _interview_if_needed(user_request: str, client) -> str:
+    """LLMPCB itself (not the person testing/developing it) checks whether
+    the request is missing critical information -- currently just power
+    source, the single item that caused the previous run's board to be
+    physically incomplete (no battery holder / connector). If missing, it
+    asks the actual end user running this CLI tool via a real terminal
+    prompt, then folds the answer into the request text used for design.
+    If the request already specifies it, no question is asked at all.
+    """
+    check_prompt = (
+        "You are checking whether a circuit design request specifies a power "
+        "source (USB, battery type, etc). Reply with exactly one word: "
+        "'SPECIFIED' if the request already states how the circuit will be "
+        "powered, or 'MISSING' if it does not."
+    )
+    resp = client.call_interviewer(check_prompt, [{"role": "user", "content": user_request}])
+    verdict = (resp.get("content") or "").strip().upper()
+    if "MISSING" not in verdict:
+        return user_request
+
+    print("\n[LLMPCB] この回路の電源方式が指定されていません。")
+    print("  1) USB給電(5V)")
+    print("  2) コイン電池(3V)")
+    print("  3) 単三電池2本(3V)")
+    print("  4) おまかせ(USB給電)")
+    choice = input("番号を選んでください [1-4]: ").strip()
+    power_map = {
+        "1": "USB給電(5V)", "2": "コイン電池(3V)", "3": "単三電池2本(3V)", "4": "USB給電(5V、おまかせ)",
+    }
+    power = power_map.get(choice, "USB給電(5V、おまかせ)")
+    print(f"[LLMPCB] 電源方式: {power} で設計します。\n")
+    return f"{user_request} 電源は{power}を使用すること。"
 
 
 def run(user_request: str) -> dict:
     client = LLMPCBGeminiClient()
+    user_request = _interview_if_needed(user_request, client)
     conversation = [{"role": "user", "content": f"Design this circuit: {user_request}"}]
     history = []
 
