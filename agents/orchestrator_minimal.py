@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -352,12 +353,24 @@ def run(user_request: str) -> dict:
 
         results = []
         for tc in resp["tool_calls"]:
+            if tc["name"] == "build_and_check_pcb" and "netlist_path" in tc["arguments"]:
+                # Always use the MOST RECENTLY generated netlist file,
+                # regardless of what path the Designer specified -- this
+                # closes a real bug: the Designer fixed a wiring mistake in
+                # the schematic (regenerating a newer netlist), but then
+                # called build_and_check_pcb with the OLD netlist_path from
+                # an earlier turn, so DRC/shorted-pin checks silently
+                # verified stale data while the LATEST board (checked
+                # separately after the run) still had the original bug.
+                candidates = sorted(Path("_work").glob("*.net"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if candidates:
+                    tc["arguments"]["netlist_path"] = str(candidates[0])
             fn = DISPATCH.get(tc["name"])
             try:
                 out = fn(**tc["arguments"]) if fn else {"error": f"unknown tool {tc['name']}"}
             except Exception as e:
                 out = {"error": str(e)}
-            results.append({"name": tc["name"], "output": out})
+            results.append({"name": tc["name"], "output": out, "args": tc["arguments"]})
 
             if tc["name"] == "build_and_check_pcb":
                 drc = out.get("drc") or {}
