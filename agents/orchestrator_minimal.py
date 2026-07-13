@@ -156,7 +156,15 @@ the returned required_width_mm/required_height_mm) even after a retry or
 two, do NOT keep looping -- state clearly that it doesn't fit, report the
 actual minimum size needed, and either use smaller-footprint part variants
 or proceed with the smallest size that actually fits, explaining the
-tradeoff."""
+tradeoff.
+
+If build_and_check_pcb reports minor clearance violations (a fraction of a
+mm short of the required spacing) even when board size was auto-computed,
+call it again but this time pass EXPLICIT board_width_mm/board_height_mm
+a few mm larger than the required_width_mm/required_height_mm the
+previous call reported -- the auto-sizer's estimate can be right at the
+edge of what fits. Do not just describe the violation in text without
+taking this corrective action."""
 
 
 def _interview_if_needed(user_request: str, client) -> str:

@@ -320,8 +320,12 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
         )
         if not probe.get("success"):
             return probe
-        board_width_mm = probe["required_width_mm"]
-        board_height_mm = probe["required_height_mm"]
+        # Small safety margin beyond the exact measured requirement --
+        # the probe pass computes the tightest possible fit, which can
+        # leave DRC clearance violations right at the edge (observed:
+        # ~0.03mm short) when used as the literal final board size.
+        board_width_mm = probe["required_width_mm"] + 5.0
+        board_height_mm = probe["required_height_mm"] + 5.0
 
     try:
         import pcbnew  # type: ignore
