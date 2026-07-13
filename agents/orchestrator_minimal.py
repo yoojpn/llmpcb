@@ -411,7 +411,14 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                 conversation.append({"role": "user", "content": f"Tool error: {resp['error']}. Try again."})
                 continue
 
-        conversation.append({"role": "assistant", "content": resp["content"] or ""})
+        # Cap the Designer's own text response before storing it in
+        # conversation -- unbounded explanatory text (e.g. restating SKiDL
+        # code, long reasoning) added every single turn was found to be a
+        # second, independent contributor to the OOM growth alongside the
+        # uncapped `history` results (fixed separately). 3000 chars mirrors
+        # the cap already used for tool results below.
+        assistant_text = (resp["content"] or "")[:3000]
+        conversation.append({"role": "assistant", "content": assistant_text})
 
         if not resp["tool_calls"]:
             history.append({"iteration": i, "note": "no tool call", "content": resp["content"]})
@@ -563,6 +570,18 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             "iteration": i, "tools": [r["name"] for r in results],
             "results": _bound_result_sizes(results),
         })
+
+        # Bound the conversation's message COUNT, not just per-message
+        # size -- 55+ iterations each adding several messages (assistant
+        # text, tool results, nudges) adds up even with per-message caps
+        # in place, and this is a long-running process with no other
+        # memory-management mechanism (unlike the full orchestrator's
+        # Condenser/offload system). Keep the first message (original
+        # request + requirements, needed for context) plus the most
+        # recent messages; drop the middle once it gets long.
+        MAX_CONVERSATION_MESSAGES = 40
+        if len(conversation) > MAX_CONVERSATION_MESSAGES:
+            conversation[:] = conversation[:1] + conversation[-(MAX_CONVERSATION_MESSAGES - 1):]
 
     return {
         "resolved": False,
