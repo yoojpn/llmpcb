@@ -723,6 +723,15 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
             fp_w = pcbnew.ToMM(bbox.GetWidth()) + part_clearance_mm
             fp_h = pcbnew.ToMM(bbox.GetHeight()) + part_clearance_mm
             footprint.SetReference(comp["ref"])
+            # Explicitly force all components onto the front (F.Cu) side --
+            # per explicit user preference, routing may freely use both
+            # F.Cu and B.Cu (already the case, verified via DSN export
+            # containing both layers), but component placement should stay
+            # single-sided for simpler assembly. FootprintLoad already
+            # defaults to F.Cu, but this makes it a guarantee rather than
+            # an assumption.
+            if footprint.GetLayer() != pcbnew.F_Cu:
+                footprint.Flip(footprint.GetPosition(), False)
             # x=0 anchors the connector body right at the board edge
             # (margin_mm/2 in from the true edge for a little copper/silk
             # clearance) so its externally-facing side is accessible.
@@ -770,6 +779,8 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
                 guard += 1
 
             footprint.SetReference(comp["ref"])
+            if footprint.GetLayer() != pcbnew.F_Cu:
+                footprint.Flip(footprint.GetPosition(), False)
             # position is the footprint's anchor (origin), not necessarily
             # its bbox center, but placing by cursor + half-size is a
             # reasonable approximation for THT/SMD footprints in this cache.
