@@ -152,7 +152,16 @@ estimate a roughly SQUARE board (width close to height, not a long thin
 strip) sized for the number and size of components -- e.g. for ~10 small
 THT/SMD passives plus one IC and one connector, try something like 40x40mm
 as a starting point, not a narrow strip. A board that's much longer than
-it is wide usually means the width was set too small for the parts."""
+it is wide usually means the width was set too small for the parts.
+
+If the user specified a maximum board size and the actual required size
+(from board_too_small/required_width_mm/required_height_mm) exceeds it
+even after a couple of retries, do NOT keep silently retrying the same
+size forever. State clearly in your response that the requested size
+cannot physically fit all components, report the actual minimum size
+needed, and either use smaller-footprint part variants (if available) or
+proceed with the smallest size that actually fits, explaining the
+tradeoff -- don't loop on an impossible constraint."""
 
 
 def _interview_if_needed(user_request: str, client) -> str:
