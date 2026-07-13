@@ -927,7 +927,7 @@ def run_drc_check(pcb_path: str) -> dict:
 _FREEROUTING_JAR = str(_PROJECT_ROOT / "_tools" / "freerouting.jar")
 
 
-def route_pcb(pcb_path: str, max_passes: int = 20, timeout_s: int = 90) -> dict:
+def route_pcb(pcb_path: str, max_passes: int = 20, timeout_s: int = 150) -> dict:
     """Auto-route the PCB's copper traces using Freerouting (headless CLI
     mode, via the standard Specctra DSN/SES interchange format that KiCad's
     own pcbnew Python API supports natively: ExportSpecctraDSN /
@@ -1016,7 +1016,7 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
     queue = ctx.Queue()
     proc = ctx.Process(target=_mp_worker, args=("_build_and_check_pcb_impl", kwargs, queue))
     proc.start()
-    proc.join(timeout=180)
+    proc.join(timeout=220)
     if proc.is_alive():
         proc.terminate()
         proc.join()
