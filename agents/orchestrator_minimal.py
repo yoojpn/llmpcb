@@ -390,6 +390,22 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
 
     for i in range(start_iteration, start_iteration + batch_size):
         print(f"[iteration {i}]", flush=True)
+
+        # Bound the conversation's message COUNT on EVERY iteration,
+        # regardless of which branch the previous iteration took --
+        # placing this only after a successful tool call (as a first
+        # attempt did) meant the many "no tool call, nudge and continue"
+        # paths (missing_footprint, routing_failed, requirement-check-fail,
+        # generic nudge) skipped it entirely, so conversation still grew
+        # unbounded whenever the Designer spent turns without calling a
+        # tool -- confirmed in practice: RSS was STILL climbing at the same
+        # rate as before this was added (1.47GB at iteration 24, nearly
+        # identical to the original 1.5GB at iteration 23), because most
+        # of a typical run's iterations don't end in a successful tool call.
+        MAX_CONVERSATION_MESSAGES = 40
+        if len(conversation) > MAX_CONVERSATION_MESSAGES:
+            conversation[:] = conversation[:1] + conversation[-(MAX_CONVERSATION_MESSAGES - 1):]
+
         resp = client.call_designer(SYSTEM_PROMPT, conversation, TOOLS, phase="light")
         if resp.get("error"):
             error_text = resp["error"]
@@ -570,18 +586,6 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             "iteration": i, "tools": [r["name"] for r in results],
             "results": _bound_result_sizes(results),
         })
-
-        # Bound the conversation's message COUNT, not just per-message
-        # size -- 55+ iterations each adding several messages (assistant
-        # text, tool results, nudges) adds up even with per-message caps
-        # in place, and this is a long-running process with no other
-        # memory-management mechanism (unlike the full orchestrator's
-        # Condenser/offload system). Keep the first message (original
-        # request + requirements, needed for context) plus the most
-        # recent messages; drop the middle once it gets long.
-        MAX_CONVERSATION_MESSAGES = 40
-        if len(conversation) > MAX_CONVERSATION_MESSAGES:
-            conversation[:] = conversation[:1] + conversation[-(MAX_CONVERSATION_MESSAGES - 1):]
 
     return {
         "resolved": False,
