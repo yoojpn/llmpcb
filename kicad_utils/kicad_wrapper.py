@@ -922,11 +922,29 @@ def run_drc_check(pcb_path: str) -> dict:
             return len(refs) == 1
 
         filtered_violations = [v for v in violations if not _same_component_only(v)]
+        # KiCad's DRC JSON report puts genuinely missing/unrouted
+        # connections in a SEPARATE top-level "unconnected_items" array,
+        # not in "violations" -- our violation_count/violations handling
+        # only ever looked at "violations", meaning a board could show
+        # violation_count=0 while still having dozens of unconnected nets.
+        # Found via manual audit: a board reported drc_clean=True /
+        # violation_count=0 at the point build_and_check_pcb was called,
+        # yet re-checking the saved file directly with kicad-cli showed 25
+        # unconnected items that were never surfaced to the Designer.
+        unconnected = report.get("unconnected_items", [])
+        for u in unconnected:
+            filtered_violations.append({
+                "type": "unconnected_item",
+                "severity": u.get("severity", "error"),
+                "description": u.get("description", "Missing connection between items"),
+                "items": u.get("items", []),
+            })
         return {
             "success": proc.returncode == 0,
             "violation_count": len(filtered_violations),
             "violations": filtered_violations,
-            "violations_ignored_same_footprint": len(violations) - len(filtered_violations),
+            "violations_ignored_same_footprint": len(violations) - len([v for v in violations if not _same_component_only(v)]),
+            "unconnected_item_count": len(unconnected),
             "stderr": proc.stderr[-2000:],
         }
     except FileNotFoundError:
