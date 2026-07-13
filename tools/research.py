@@ -104,6 +104,15 @@ class FootprintSearchResult:
     found: bool
     source: Optional[str] = None
     symbol_file: Optional[str] = None
+    symbol_name: Optional[str] = None  # the actual part name INSIDE symbol_file --
+    # required as Part()'s second argument. Distinct from footprint_ref,
+    # which is a KiCad footprint library:name string, not a symbol name.
+    # A real bug occurred from this ambiguity: the Designer used
+    # footprint_ref's name portion as the symbol name, which happened to
+    # be a footprint's own descriptive name (e.g.
+    # "SW-TH_5P-L12.5-W13.4-P2.50-LS14.5") rather than the actual part
+    # name defined in the .kicad_sym file (e.g. "PEC11R-4215F-S0024"),
+    # causing "Unable to find part X in library Y".
     footprint_file: Optional[str] = None
     footprint_ref: Optional[str] = None  # canonical "LibName:FootprintName"
     candidates: Optional[list] = None  # similar real part names found, if any
@@ -204,10 +213,18 @@ def search_footprint_library(part_number: str, manufacturer: str = "",
             # LCSC's own product page instead of a separate general web
             # search for it later.
             datasheet_url = get_datasheet_url_from_lcsc(lcsc_id)
+            symbol_name = None
+            sym_file = ez_result.get("symbol_file")
+            if sym_file and os.path.exists(sym_file):
+                sym_text = Path(sym_file).read_text(encoding="utf-8", errors="ignore")
+                m = re.search(r'\(symbol "([^"]+)"', sym_text)
+                if m:
+                    symbol_name = m.group(1)
             result = FootprintSearchResult(
                 found=True,
                 source=f"easyeda2kicad_lcsc_{lcsc_id}",
                 symbol_file=ez_result["symbol_file"],
+                symbol_name=symbol_name,
                 footprint_file=fp_path,
                 footprint_ref=fp_ref,
                 datasheet_url=datasheet_url,

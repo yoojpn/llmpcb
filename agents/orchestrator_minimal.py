@@ -125,6 +125,14 @@ resistors/capacitors/LEDs -- no search needed for those. Work efficiently:
 batch independent searches in one turn when possible. Aim to finish in as
 few turns as possible.
 
+When calling Part(symbol_file, ..., footprint=...), the second positional
+argument must be search_footprint_library's `symbol_name` field (the
+actual part name defined inside the .kicad_sym file), NOT `footprint_ref`
+or any part of it -- these are different things (footprint_ref is a
+"library:footprint" string describing the physical pad layout, symbol_name
+is the schematic symbol's name) and using the wrong one causes "Unable to
+find part X in library Y" even though the search itself succeeded.
+
 SKiDL connection syntax: `net += part[pin_number]` connects a Net to a
 specific pin by its NUMBER (an int or str like 1, "1", "VBUS") -- always
 index into the Part with [ ] to get a Pin object first. Never write
