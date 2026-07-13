@@ -454,6 +454,15 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float, board_height_m
         board_too_small = (
             required_height_mm > board_height_mm or required_width_mm > board_width_mm
         )
+        # The shelf-packing algorithm above produces a long thin strip when
+        # the requested width is much smaller than what's needed to fit
+        # everything in fewer rows (e.g. a 45x45mm request can still need
+        # 52x107mm because only ~1 row's worth of parts fit per pass).
+        # Suggest a roughly-square size based on total footprint area, so
+        # a caller retrying after board_too_small gets a sane target
+        # instead of just "make height bigger" (which keeps the strip shape).
+        total_area_mm2 = required_width_mm * required_height_mm
+        suggested_square_side_mm = round(total_area_mm2 ** 0.5, 1)
 
         # NOTE: trace routing between footprints is not implemented; DRC will
         # report unrouted nets. Component placement/clearance/courtyard
@@ -463,6 +472,7 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float, board_height_m
             "success": True,
             "pcb_path": str(pcb_path),
             "mounting_holes_placed": len(mounting_holes or []),
+            "suggested_square_board_side_mm": suggested_square_side_mm if board_too_small else None,
             "components_placed": placed,
             "components_missing_footprint": [c["ref"] for c in missing],
             "board_too_small": board_too_small,

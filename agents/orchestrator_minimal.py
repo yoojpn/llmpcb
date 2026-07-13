@@ -157,36 +157,56 @@ it is wide usually means the width was set too small for the parts."""
 
 def _interview_if_needed(user_request: str, client) -> str:
     """LLMPCB itself (not the person testing/developing it) checks whether
-    the request is missing critical information -- currently just power
-    source, the single item that caused the previous run's board to be
-    physically incomplete (no battery holder / connector). If missing, it
-    asks the actual end user running this CLI tool via a real terminal
-    prompt, then folds the answer into the request text used for design.
-    If the request already specifies it, no question is asked at all.
+    the request is missing critical information the user should decide --
+    power source and board size -- and asks the actual end user running
+    this CLI tool via real terminal prompts. Each item is checked and
+    asked independently, so specifying one doesn't skip asking the other.
+    If the request already specifies an item, that question is skipped.
     """
-    check_prompt = (
-        "You are checking whether a circuit design request specifies a power "
-        "source (USB, battery type, etc). Reply with exactly one word: "
-        "'SPECIFIED' if the request already states how the circuit will be "
-        "powered, or 'MISSING' if it does not."
-    )
-    resp = client.call_interviewer(check_prompt, [{"role": "user", "content": user_request}])
-    verdict = (resp.get("content") or "").strip().upper()
-    if "MISSING" not in verdict:
-        return user_request
+    def _is_missing(topic: str, description: str) -> bool:
+        check_prompt = (
+            f"You are checking whether a circuit design request specifies {description}. "
+            f"Reply with exactly one word: 'SPECIFIED' if the request already states this, "
+            f"or 'MISSING' if it does not."
+        )
+        resp = client.call_interviewer(check_prompt, [{"role": "user", "content": user_request}])
+        return "MISSING" in (resp.get("content") or "").strip().upper()
 
-    print("\n[LLMPCB] この回路の電源方式が指定されていません。")
-    print("  1) USB給電(5V)")
-    print("  2) コイン電池(3V)")
-    print("  3) 単三電池2本(3V)")
-    print("  4) おまかせ(USB給電)")
-    choice = input("番号を選んでください [1-4]: ").strip()
-    power_map = {
-        "1": "USB給電(5V)", "2": "コイン電池(3V)", "3": "単三電池2本(3V)", "4": "USB給電(5V、おまかせ)",
-    }
-    power = power_map.get(choice, "USB給電(5V、おまかせ)")
-    print(f"[LLMPCB] 電源方式: {power} で設計します。\n")
-    return f"{user_request} 電源は{power}を使用すること。"
+    if _is_missing("power", "a power source (USB, battery type, etc)"):
+        print("\n[LLMPCB] この回路の電源方式が指定されていません。")
+        print("  1) USB給電(5V)")
+        print("  2) コイン電池(3V)")
+        print("  3) 単三電池2本(3V)")
+        print("  4) おまかせ(USB給電)")
+        choice = input("番号を選んでください [1-4]: ").strip()
+        power_map = {
+            "1": "USB給電(5V)", "2": "コイン電池(3V)", "3": "単三電池2本(3V)", "4": "USB給電(5V、おまかせ)",
+        }
+        power = power_map.get(choice, "USB給電(5V、おまかせ)")
+        print(f"[LLMPCB] 電源方式: {power} で設計します。\n")
+        user_request = f"{user_request} 電源は{power}を使用すること。"
+
+    if _is_missing("board size", "a target board/enclosure size (dimensions in mm)"):
+        print("[LLMPCB] 基板サイズの希望はありますか?")
+        print("  1) 指定なし(部品構成に応じてAIが提案)")
+        print("  2) 30x30mm以内")
+        print("  3) 50x50mm以内")
+        print("  4) 自分でmm数を入力")
+        size_choice = input("番号を選んでください [1-4]: ").strip()
+        if size_choice == "2":
+            size_text = "基板サイズは30x30mm以内に収めること。"
+        elif size_choice == "3":
+            size_text = "基板サイズは50x50mm以内に収めること。"
+        elif size_choice == "4":
+            w = input("横幅(mm): ").strip()
+            h = input("縦幅(mm): ").strip()
+            size_text = f"基板サイズは{w}x{h}mm以内に収めること。"
+        else:
+            size_text = "基板サイズの指定なし。部品構成から適切なサイズ(できるだけ正方形に近い形)を提案すること。"
+        print(f"[LLMPCB] 基板サイズ: {size_text}\n")
+        user_request = f"{user_request} {size_text}"
+
+    return user_request
 
 
 def _extract_requirements(user_request: str, client) -> str:
