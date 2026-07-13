@@ -198,6 +198,22 @@ def run_spice_simulation(netlist: str, analysis_type: str = "dc",
         return {"success": False, "error": "timeout after 60s"}
 
 
+def get_netlist_ref_values(netlist_path: str) -> list[dict]:
+    """Lightweight extraction of (ref, value) pairs for every component in
+    a netlist -- e.g. [{"ref": "U1", "value": "NE555P"}, {"ref": "D1",
+    "value": "LED"}]. Used to check actual functional-completeness (does
+    the real, final design contain the part types it needs) against a
+    requirements checklist, since a reference designator alone (e.g. "U1")
+    says nothing about what the part actually is.
+    """
+    import re
+    content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
+    out = []
+    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\).*?\(value "([^"]*)"\)', content, re.DOTALL):
+        out.append({"ref": m.group(1), "value": m.group(2)})
+    return out
+
+
 def _parse_netlist_components(netlist_path: str) -> list[dict]:
     """Parse a SKiDL-generated (KiCad legacy S-expression) netlist file and
     extract (ref, footprint_lib, footprint_name) for each component.

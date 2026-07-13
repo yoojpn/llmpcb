@@ -182,10 +182,63 @@ def _interview_if_needed(user_request: str, client) -> str:
     return f"{user_request} 電源は{power}を使用すること。"
 
 
+def _extract_requirements(user_request: str, client) -> str:
+    """Before design starts, think through what "done" actually requires --
+    not just power source (already handled by the interview step) but the
+    functional behavior itself. E.g. "LED blinker" implies an oscillator
+    (555 timer, microcontroller, astable circuit) is REQUIRED -- a steady-on
+    LED with just a resistor satisfies zero DRC violations but does not
+    satisfy the actual request. This checklist is injected into the design
+    prompt so the Designer keeps it in view throughout, and is checked again
+    against the ACTUAL final component list before declaring success (see
+    _verify_requirements).
+    """
+    prompt = (
+        "Given this circuit request, list the SHORT set of concrete functional "
+        "requirements a correct design must satisfy -- especially anything "
+        "implied but not stated outright (e.g. 'blinker'/'blinking' implies "
+        "an oscillator component like a 555 timer or microcontroller is "
+        "required; a resistor+LED alone would just be steady-on, not "
+        "blinking). Be concrete about what component TYPE would satisfy each "
+        "requirement. Keep it to 2-4 bullet points, no more."
+    )
+    resp = client.call_interviewer(prompt, [{"role": "user", "content": user_request}])
+    return resp.get("content") or ""
+
+
+def _verify_requirements(requirements: str, final_components: list[dict], client) -> tuple[bool, str]:
+    """One-shot final check: does the ACTUAL component list (from the real
+    generated netlist, not the model's memory of the conversation) satisfy
+    the requirements extracted at the start? Returns (passed, explanation).
+    """
+    prompt = (
+        "Compare this list of functional requirements against the ACTUAL "
+        "components in the final board (from the real generated netlist, "
+        "not memory). Reply with a short explanation, then end with exactly "
+        "one line: 'VERDICT: PASS' if every requirement is satisfied by an "
+        "actual component present, or 'VERDICT: FAIL' if anything is missing."
+    )
+    content = (
+        f"Requirements:\n{requirements}\n\n"
+        f"Actual final components: {json.dumps(final_components, ensure_ascii=False)}"
+    )
+    resp = client.call_interviewer(prompt, [{"role": "user", "content": content}])
+    text = resp.get("content") or ""
+    import re
+    m = re.search(r"VERDICT:\s*(PASS|FAIL)", text, re.IGNORECASE)
+    passed = bool(m and m.group(1).upper() == "PASS")
+    return passed, text
+
+
 def run(user_request: str) -> dict:
     client = LLMPCBGeminiClient()
     user_request = _interview_if_needed(user_request, client)
-    conversation = [{"role": "user", "content": f"Design this circuit: {user_request}"}]
+    requirements = _extract_requirements(user_request, client)
+    print(f"[LLMPCB] 機能要件チェックリスト:\n{requirements}\n")
+    conversation = [{
+        "role": "user",
+        "content": f"Design this circuit: {user_request}\n\nFunctional requirements to satisfy:\n{requirements}",
+    }]
     history = []
 
     for i in range(1, MAX_ITERATIONS + 1):
@@ -215,10 +268,23 @@ def run(user_request: str) -> dict:
 
         if not resp["tool_calls"]:
             history.append({"iteration": i, "note": "no tool call", "content": resp["content"]})
-            # check if last DRC was clean
             last_drc = next((h for h in reversed(history) if "drc_clean" in h), None)
             if last_drc and last_drc["drc_clean"]:
-                return {"resolved": True, "iterations": i, "history": history}
+                final_components = last_drc.get("components", [])
+                passed, explanation = _verify_requirements(requirements, final_components, client)
+                print(f"[LLMPCB] 機能要件の最終確認: {'PASS' if passed else 'FAIL'}")
+                history.append({"iteration": i, "requirement_check": passed, "explanation": explanation})
+                if passed:
+                    return {"resolved": True, "iterations": i, "history": history}
+                conversation.append({
+                    "role": "user",
+                    "content": (
+                        f"DRC is clean, but the design does not satisfy the stated functional "
+                        f"requirements: {explanation}\nFix the SKiDL code to add what's missing, "
+                        f"then rebuild the schematic and PCB."
+                    )
+                })
+                continue
             conversation.append({"role": "user", "content": "Continue -- call the next tool needed."})
             continue
 
@@ -233,7 +299,14 @@ def run(user_request: str) -> dict:
 
             if tc["name"] == "build_and_check_pcb":
                 drc = out.get("drc") or {}
-                history.append({"iteration": i, "drc_clean": drc.get("violation_count") == 0 and out.get("layout", {}).get("success")})
+                layout = out.get("layout") or {}
+                netlist_path = tc["arguments"].get("netlist_path")
+                ref_values = kicad_wrapper.get_netlist_ref_values(netlist_path) if netlist_path else []
+                history.append({
+                    "iteration": i,
+                    "drc_clean": drc.get("violation_count") == 0 and layout.get("success"),
+                    "components": ref_values,
+                })
 
         conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}"})
         history.append({"iteration": i, "tools": [r["name"] for r in results], "results": results})
