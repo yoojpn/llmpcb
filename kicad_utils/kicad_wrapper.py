@@ -190,14 +190,43 @@ def generate_schematic(skidl_code: str, output_name: str) -> dict:
                 nan_detected = True
                 success = False
         pin_name_hint = None
-        if not success and "'NoneType' and 'Net'" in proc.stderr:
-            # This specific TypeError means `part['WRONG_PIN']` returned
-            # None (the pin name/number doesn't exist) and the next `+=`
-            # crashed. Rather than let the Designer keep guessing variant
-            # names one at a time (observed: RESET, RST, RESET all failing
-            # in a row for what turned out to be '~{RST}'), find which
-            # variable the failing line references and look up its actual
-            # pin names to hand back directly.
+        if not success and ("'NoneType' and 'Net'" in proc.stderr or "'NoneType' object is not iterable" in proc.stderr):
+            # This TypeError means `part['WRONG_PIN']` returned None (the
+            # pin name/number doesn't exist) and the next connection
+            # attempt crashed -- regardless of whether the code wrote
+            # `part[pin] += net` or `net += part[pin]`. SKiDL's own
+            # diagnostic line -- "ERROR: No pins found using LIB:PART[('PIN',)]"
+            # -- names the failing pin but LIB there is the symbol's
+            # internal name, not necessarily the file to load (e.g. for an
+            # LCSC-fetched part, LIB is the symbol_name like "105017-0001",
+            # not the .kicad_sym filename, which is keyed by LCSC ID
+            # instead). Match it back to the actual Part(...) call in the
+            # Designer's own code, which has the real symbol_file path.
+            m = re.search(r"No pins found using ([^:]+):(\S+)\[\('([^']+)',?\)\]", proc.stderr)
+            if m:
+                _lib_name, _instance_ref, bad_pin = m.groups()
+                var_m = re.search(
+                    rf'(\w+)\s*=\s*Part\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']',
+                    skidl_code,
+                )
+                for var_name, lib_or_path, part_name in re.findall(
+                    r'(\w+)\s*=\s*Part\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']', skidl_code
+                ):
+                    if part_name != _lib_name:
+                        continue
+                    try:
+                        import skidl as _skidl
+                        p = _skidl.Part(lib_or_path, part_name)
+                        pin_names = [pin.name for pin in p.pins]
+                        pin_name_hint = (
+                            f"'{bad_pin}' is not a real pin name/number on {var_name} ({part_name}). "
+                            f"Its ACTUAL pin names are: {pin_names}. Use the exact name from this list, "
+                            f"or use pin NUMBERS instead (e.g. {var_name}[1])."
+                        )
+                        break
+                    except Exception:
+                        continue
+        elif not success:
             m = re.search(r'^\s*(\w+)\[[\'"]([^\'"]+)[\'"]\]\s*\+=', proc.stderr, re.MULTILINE)
             if m:
                 var_name, bad_pin = m.groups()
