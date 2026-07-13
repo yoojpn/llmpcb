@@ -781,8 +781,14 @@ def run_drc_check(pcb_path: str) -> dict:
         # boards, since resizing/repositioning components can't change a
         # single footprint's own internal pad layout.
         def _same_component_only(v):
-            if v.get("type") != "clearance":
-                return False
+            # Not limited to "clearance" -- the same root cause (a
+            # footprint's own internal pad/sub-pad layout, e.g. a thermal
+            # pad split into multiple physical sub-pads where some are
+            # tied to GND and others left unconnected within ONE part)
+            # also surfaces as other DRC violation types like
+            # "shorting_items". What matters is whether every item in the
+            # violation belongs to the same single component -- if so, our
+            # placement/routing had no hand in it and can't fix it either.
             refs = set()
             for item in v.get("items", []):
                 desc = item.get("description", "")
