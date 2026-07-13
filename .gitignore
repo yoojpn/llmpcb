@@ -6,3 +6,4 @@ _lib_cache/
 logs/*.jsonl
 .env
 *.kicad_pcb-bak
+_tools/
