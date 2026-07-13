@@ -119,6 +119,20 @@ def _autocorrect_part_names(skidl_code: str) -> tuple[str, list[dict]]:
 def generate_schematic(skidl_code: str, output_name: str) -> dict:
     # NOTE: run in a sandboxed/restricted environment in production.
     skidl_code, part_name_corrections = _autocorrect_part_names(skidl_code)
+    # Automatically insert an ERC() call right before generate_netlist(),
+    # if the Designer's code doesn't already call it -- SKiDL's own
+    # Electrical Rules Check catches unconnected pins, drive conflicts, and
+    # power-connection errors, but relying on the Designer to remember to
+    # call it manually is unreliable. This does NOT catch every mistake
+    # (e.g. a component with both pins tied to the same net, which is
+    # topologically valid but functionally wrong) -- see the separate
+    # same-net-both-pins check below for that category.
+    if "ERC()" not in skidl_code and "ERC ()" not in skidl_code:
+        skidl_code = re.sub(
+            r"(generate_netlist\s*\()",
+            r"ERC()\n\1",
+            skidl_code, count=1,
+        )
     # output_name may or may not include a .net suffix already; normalize.
     base_name = output_name[:-4] if output_name.endswith(".net") else output_name
     script_path = WORKDIR / f"{base_name}.py"
@@ -196,6 +210,43 @@ def run_spice_simulation(netlist: str, analysis_type: str = "dc",
         return {"success": False, "error": "ngspice not installed"}
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "timeout after 60s"}
+
+
+def find_shorted_two_pin_parts(netlist_path: str) -> list[dict]:
+    """Detect a specific, common LLM wiring mistake: a 2-pin passive
+    component (resistor, capacitor, LED, etc) with BOTH pins landing on
+    the exact same net. This is topologically valid (SKiDL/ERC won't flag
+    it -- both pins ARE connected to something) but functionally means the
+    component does nothing (e.g. a "current limiting resistor" wired with
+    both ends on the same 5V rail, observed in practice, silently passing
+    both DRC and a naive functional-completeness check that only verifies
+    the part exists). Only checks parts with exactly 2 pins, and only
+    passive/2-terminal device types -- a multi-pin IC legitimately having
+    several pins on the same power/ground net is normal and not flagged.
+    """
+    import re
+    content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
+
+    # ref -> part type, from each (comp (ref "X") ... (libsource (lib "Y") (part "Z"))) block
+    ref_to_part = {}
+    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\)(.*?)\(libsource\s*\(lib "[^"]*"\)\s*\(part "([^"]+)"\)', content, re.DOTALL):
+        ref, _, part = m.groups()
+        ref_to_part[ref] = part
+    two_terminal_types = {"R", "C", "L", "D", "LED", "Fuse", "Ferrite_Bead"}
+
+    # ref+pin -> net name, from each net block's node list
+    pin_counts: dict[tuple[str, str], int] = {}
+    net_section = content[content.find("(nets"):] if "(nets" in content else ""
+    for net_m in re.finditer(r'\(net\s*\(code \d+\)\s*\(name "([^"]+)"\)(.*?)(?=\(net\s*\(code|\Z)', net_section, re.DOTALL):
+        net_name, body = net_m.groups()
+        for ref, pin in re.findall(r'\(node\s*\(ref "([^"]+)"\)\s*\(pin "([^"]+)"\)', body):
+            pin_counts[(ref, net_name)] = pin_counts.get((ref, net_name), 0) + 1
+
+    shorted = []
+    for (ref, net_name), count in pin_counts.items():
+        if count >= 2 and ref_to_part.get(ref) in two_terminal_types:
+            shorted.append({"ref": ref, "part": ref_to_part.get(ref), "net": net_name, "pins_on_same_net": count})
+    return shorted
 
 
 def get_netlist_ref_values(netlist_path: str) -> list[dict]:
@@ -564,6 +615,26 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
     if not layout_result.get("success"):
         return {"layout": layout_result, "drc": None}
     drc_result = run_drc_check(layout_result["pcb_path"])
+    shorted = find_shorted_two_pin_parts(netlist_path)
+    if shorted and drc_result:
+        # These are real functional bugs (a component wired to do nothing)
+        # that standard DRC/ERC don't catch -- fold them into the DRC
+        # violation count/list so the existing auto-fix loop treats them
+        # with the same seriousness as a physical clearance violation,
+        # rather than needing a separate code path the Designer might miss.
+        drc_result["violation_count"] = drc_result.get("violation_count", 0) + len(shorted)
+        drc_result.setdefault("violations", [])
+        for s in shorted:
+            drc_result["violations"].append({
+                "type": "shorted_two_pin_component",
+                "severity": "error",
+                "description": (
+                    f"Component {s['ref']} ({s['part']}) has both pins connected to the same "
+                    f"net ('{s['net']}') -- it is wired to do nothing (e.g. a resistor or LED "
+                    f"with both ends on the same rail is not actually in the current path). "
+                    f"Fix the SKiDL connections so each pin goes to a DIFFERENT net."
+                ),
+            })
     return {"layout": layout_result, "drc": drc_result}
 
 

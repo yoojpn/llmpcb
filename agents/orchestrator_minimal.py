@@ -132,6 +132,17 @@ reference and will crash with "TypeError: 'float' object is not iterable".
 Check a connector's actual pin numbers/names from its footprint search
 result before wiring it, rather than guessing pin numbers.
 
+For simple series chains (e.g. power -> resistor -> LED -> ground), PREFER
+SKiDL's chain operator over manual pin-by-pin +=: `vcc & r1 & led1 & gnd`
+connects them in series automatically and is much harder to get wrong than
+`r1[1] += vcc; r1[2] += led1[1]; led1[2] += gnd` by hand -- manual
+pin-by-pin wiring has caused a real bug where a resistor ended up with
+BOTH pins on the same net, silently doing nothing electrically while
+still passing DRC. A 2-pin component with both pins on the same net is
+always a bug -- double check any manual wiring for this before finishing.
+Include ERC() in your script before generate_netlist (auto-inserted if
+you forget, but read its output yourself for unconnected-pin warnings).
+
 If build_and_check_pcb reports clearance violations, call it again with a
 LARGER board_width_mm/board_height_mm (e.g. +10mm) to give components more
 room -- do not just describe the problem in text, take the corrective
