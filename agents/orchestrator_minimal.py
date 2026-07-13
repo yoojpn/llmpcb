@@ -19,7 +19,7 @@ from tools import calculators, research
 from kicad_utils import kicad_wrapper
 from agents.gemini_client import LLMPCBGeminiClient
 
-MAX_ITERATIONS = 15
+MAX_ITERATIONS = 20
 
 TOOLS = [
     {
@@ -299,18 +299,11 @@ def _verify_requirements(requirements: str, final_components: list[dict], client
     return passed, text
 
 
-def run(user_request: str) -> dict:
-    client = LLMPCBGeminiClient()
-    user_request = _interview_if_needed(user_request, client)
-    requirements = _extract_requirements(user_request, client)
-    print(f"[LLMPCB] 機能要件チェックリスト:\n{requirements}\n")
-    conversation = [{
-        "role": "user",
-        "content": f"Design this circuit: {user_request}\n\nFunctional requirements to satisfy:\n{requirements}",
-    }]
+def _run_batch(user_request: str, client, conversation: list, requirements: str,
+                start_iteration: int, batch_size: int) -> dict:
     history = []
 
-    for i in range(1, MAX_ITERATIONS + 1):
+    for i in range(start_iteration, start_iteration + batch_size):
         print(f"[iteration {i}]", flush=True)
         resp = client.call_designer(SYSTEM_PROMPT, conversation, TOOLS, phase="light")
         if resp.get("error"):
@@ -344,7 +337,7 @@ def run(user_request: str) -> dict:
                 print(f"[LLMPCB] 機能要件の最終確認: {'PASS' if passed else 'FAIL'}")
                 history.append({"iteration": i, "requirement_check": passed, "explanation": explanation})
                 if passed:
-                    return {"resolved": True, "iterations": i, "history": history}
+                    return {"resolved": True, "iterations": i, "history": history, "conversation": conversation}
                 conversation.append({
                     "role": "user",
                     "content": (
@@ -421,7 +414,48 @@ def run(user_request: str) -> dict:
         conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}"})
         history.append({"iteration": i, "tools": [r["name"] for r in results], "results": results})
 
-    return {"resolved": False, "iterations": MAX_ITERATIONS, "history": history}
+    return {
+        "resolved": False,
+        "iterations": start_iteration + batch_size - 1,
+        "history": history,
+        "conversation": conversation,
+    }
+
+
+def run(user_request: str) -> dict:
+    client = LLMPCBGeminiClient()
+    user_request = _interview_if_needed(user_request, client)
+    requirements = _extract_requirements(user_request, client)
+    print(f"[LLMPCB] 機能要件チェックリスト:\n{requirements}\n")
+    conversation = [{
+        "role": "user",
+        "content": f"Design this circuit: {user_request}\n\nFunctional requirements to satisfy:\n{requirements}",
+    }]
+
+    all_history = []
+    next_iteration = 1
+    batch_count = 0
+    MAX_BATCHES_NONINTERACTIVE = 3  # safety cap when auto-continuing unattended (60 iterations total)
+    while True:
+        batch_count += 1
+        result = _run_batch(user_request, client, conversation, requirements, next_iteration, MAX_ITERATIONS)
+        all_history.extend(result["history"])
+        conversation = result["conversation"]
+        if result["resolved"]:
+            return {"resolved": True, "iterations": result["iterations"], "history": all_history}
+
+        next_iteration = result["iterations"] + 1
+        print(f"\n[LLMPCB] {result['iterations']}回で完成しませんでした。さらに{MAX_ITERATIONS}回続けますか?")
+        if os.environ.get("LLMPCB_NONINTERACTIVE_CONTINUE"):
+            if batch_count >= MAX_BATCHES_NONINTERACTIVE:
+                print(f"[LLMPCB] 非対話モードの上限({MAX_BATCHES_NONINTERACTIVE}バッチ)に達したため終了します。")
+                return {"resolved": False, "iterations": result["iterations"], "history": all_history}
+            choice = ""
+        else:
+            choice = input("続ける場合は何か入力、終了する場合は 'q' [続ける/q]: ").strip().lower()
+        if choice == "q":
+            return {"resolved": False, "iterations": result["iterations"], "history": all_history}
+        print(f"[LLMPCB] さらに{MAX_ITERATIONS}回、設計を続けます。\n")
 
 
 if __name__ == "__main__":
