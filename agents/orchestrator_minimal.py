@@ -258,6 +258,61 @@ def _interview_if_needed(user_request: str, client) -> str:
     return user_request
 
 
+def _verify_against_datasheets(final_components: list[dict], nets_info: dict, client) -> tuple[bool, str]:
+    """Generic (not connector-type-specific) wiring verification: for each
+    non-trivial component (skip simple R/C/L/LED passives), re-fetch its
+    real datasheet and ask the model to check the ACTUAL net connections
+    against that SPECIFIC part's documented requirements -- mandatory
+    pull resistors, decoupling, enable-pin handling, unused-pin treatment,
+    etc. This generalizes the USB-C CC1/CC2 case (found via manual audit)
+    to any part with its own special wiring requirements, without needing
+    to hand-write a check for every connector/IC family in existence --
+    the datasheet text itself is the source of truth each time, not
+    baked-in domain knowledge about one specific connector type.
+    """
+    import re
+    findings = []
+    for comp in final_components:
+        ref, value = comp.get("ref", ""), comp.get("value", "")
+        if re.fullmatch(r"R|C|L|LED|Fuse|D", value or "") or not value:
+            continue  # skip simple passives with no generic part number to look up
+        try:
+            search_result = research.search_footprint_library(value, "")
+        except Exception:
+            continue
+        datasheet_url = search_result.get("datasheet_url") if search_result else None
+        if not datasheet_url:
+            continue
+        try:
+            extracted = research.fetch_and_extract_schematic_data(
+                datasheet_url, "typical application circuit, pin description, unused pin handling"
+            )
+        except Exception:
+            continue
+        excerpt = (extracted or {}).get("raw_text_excerpt") or (extracted or {}).get("content") or ""
+        if not excerpt:
+            continue
+        actual_conn = {net: pins for net, pins in nets_info.items() if any(r == ref for r, _ in pins)}
+        findings.append({"ref": ref, "part": value, "actual_connections": actual_conn, "datasheet_excerpt": excerpt[:2000]})
+
+    if not findings:
+        return True, "No non-passive parts with fetchable datasheets to cross-check; nothing to verify here."
+
+    prompt = (
+        "For each component below, compare its ACTUAL net connections against what its OWN "
+        "datasheet excerpt says is required (mandatory pull resistors/terminations, decoupling "
+        "capacitors, how to handle an enable/unused pin, etc). Flag anything the datasheet "
+        "says is required but is missing or wired incorrectly in the actual connections -- be "
+        "specific about which pin and which requirement. If everything checks out, say so. "
+        "End with exactly one line: 'VERDICT: PASS' or 'VERDICT: FAIL'."
+    )
+    resp = client.call_interviewer(prompt, [{"role": "user", "content": json.dumps(findings, ensure_ascii=False, default=str)[:8000]}])
+    text = resp.get("content") or ""
+    m = re.search(r"VERDICT:\s*(PASS|FAIL)", text, re.IGNORECASE)
+    passed = bool(m and m.group(1).upper() == "PASS")
+    return passed, text
+
+
 def _extract_requirements(user_request: str, client) -> str:
     """Before design starts, think through what "done" actually requires --
     not just power source (already handled by the interview step) but the
@@ -371,7 +426,21 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                 print(f"[LLMPCB] 機能要件の最終確認: {'PASS' if passed else 'FAIL'}")
                 history.append({"iteration": i, "requirement_check": passed, "explanation": explanation})
                 if passed:
-                    return {"resolved": True, "iterations": i, "history": history, "conversation": conversation}
+                    nets_info = kicad_wrapper.get_netlist_nets(last_drc.get("netlist_path")) if last_drc.get("netlist_path") else {}
+                    ds_passed, ds_explanation = _verify_against_datasheets(final_components, nets_info, client)
+                    print(f"[LLMPCB] データシート照合検証: {'PASS' if ds_passed else 'FAIL'}")
+                    history.append({"iteration": i, "datasheet_check": ds_passed, "explanation": ds_explanation})
+                    if ds_passed:
+                        return {"resolved": True, "iterations": i, "history": history, "conversation": conversation}
+                    conversation.append({
+                        "role": "user",
+                        "content": (
+                            f"Functional requirements are satisfied, but a datasheet cross-check on the "
+                            f"actual wiring found a problem: {ds_explanation}\nFix the SKiDL code accordingly, "
+                            f"then rebuild the schematic and PCB."
+                        )
+                    })
+                    continue
                 conversation.append({
                     "role": "user",
                     "content": (
