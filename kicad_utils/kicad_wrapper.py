@@ -709,6 +709,31 @@ def generate_pcb_layout(netlist_path: str, board_width_mm: float = None, board_h
                 if pad is not None:
                     pad.SetNet(net_info)
 
+        # Auto-relax the board's minimum-hole-size design rule to match
+        # whatever the actual placed parts need, rather than leaving
+        # KiCad's generic 0.3mm default in place. Real parts (e.g. ESP32
+        # modules with thermal-pad vias, or other fine-pitch footprints)
+        # routinely specify smaller drills (0.2mm and below are standard
+        # and manufacturable at JLCPCB/PCBWay etc) -- flagging those as DRC
+        # violations against an arbitrary generic default was a false
+        # positive the Designer had no way to fix itself (previously
+        # observed giving up after concluding "this requires manual KiCad
+        # settings changes"). The board should adapt to its components,
+        # not the other way around.
+        min_drill_mm = None
+        for fp in board.GetFootprints():
+            for pad in fp.Pads():
+                drill = pad.GetDrillSize()
+                d = min(drill.x, drill.y) if drill.x > 0 and drill.y > 0 else None
+                if d:
+                    d_mm = pcbnew.ToMM(d)
+                    if min_drill_mm is None or d_mm < min_drill_mm:
+                        min_drill_mm = d_mm
+        if min_drill_mm is not None:
+            settings = board.GetDesignSettings()
+            if min_drill_mm < pcbnew.ToMM(settings.m_MinThroughDrill):
+                settings.m_MinThroughDrill = pcbnew.FromMM(min_drill_mm)
+
         board.Save(str(pcb_path))
         return {
             "success": True,
