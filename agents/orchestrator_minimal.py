@@ -499,12 +499,39 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                         )
                     })
                     continue
+                # Detect the SAME requirement-check failure recurring
+                # across consecutive checks -- observed in practice: the
+                # identical rotary-encoder-shorted-to-two-GPIOs bug was
+                # flagged correctly on iterations 49, 51, 52, 55, 57 (12
+                # iterations, never fixed) because the feedback was just
+                # prose explanation with no concrete fix, and the Designer
+                # kept regenerating a similarly-broken schematic. When this
+                # happens, give a much more mechanical instruction.
+                prior_req_checks = [h for h in history if "requirement_check" in h and not h["requirement_check"]]
+                repeat_failure_hint = ""
+                if len(prior_req_checks) >= 2:
+                    prev_explanation = prior_req_checks[-2].get("explanation", "")
+                    # crude similarity: shared net/pin-name tokens between
+                    # this failure and the previous one
+                    import re as _re
+                    prev_tokens = set(_re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", prev_explanation))
+                    cur_tokens = set(_re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", explanation))
+                    if len(prev_tokens & cur_tokens) >= 3:
+                        repeat_failure_hint = (
+                            "\n\nIMPORTANT: This is the SAME problem flagged in a previous check "
+                            "(overlapping component/net names), meaning the last fix attempt did NOT "
+                            "actually resolve it. Do not just reassign the SAME pin numbers again -- "
+                            "explicitly list which GPIO/pin numbers are ALREADY used by other nets in "
+                            "this design first, then pick a genuinely UNUSED pin number for the "
+                            "conflicting connection. Double-check the new SKiDL code actually changes "
+                            "the pin number before rebuilding."
+                        )
                 conversation.append({
                     "role": "user",
                     "content": (
                         f"DRC is clean, but the design does not satisfy the stated functional "
                         f"requirements: {explanation}\nFix the SKiDL code to add what's missing, "
-                        f"then rebuild the schematic and PCB."
+                        f"then rebuild the schematic and PCB.{repeat_failure_hint}"
                     )
                 })
                 continue
