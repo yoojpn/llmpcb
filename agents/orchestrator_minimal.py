@@ -488,7 +488,13 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                         "role": "user",
                         "content": (
                             f"Functional requirements are satisfied, but a datasheet cross-check on the "
-                            f"actual wiring found a problem: {ds_explanation}\nFix the SKiDL code accordingly, "
+                            f"actual wiring found a problem: {ds_explanation}\n"
+                            f"IMPORTANT: fix this by adding the SPECIFIC missing connections to the "
+                            f"EXISTING components -- do NOT swap a component for a different/more complex "
+                            f"part or footprint (e.g. do not replace a simple power connector with a "
+                            f"full-featured data receptacle just because its datasheet documents optional "
+                            f"data-line pins your design doesn't use). Add only what the cross-check "
+                            f"actually flagged as missing, keeping everything else in the design the same, "
                             f"then rebuild the schematic and PCB."
                         )
                     })
