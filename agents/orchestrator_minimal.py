@@ -597,7 +597,23 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     "advisory_warnings": drc.get("advisory_warnings", []),
                 })
 
-        conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}"})
+        # If the schematic just succeeded, explicitly tell the Designer to
+        # move to PCB placement/DRC next -- without this, the Designer was
+        # observed making small, unnecessary tweaks to an ALREADY-successful
+        # schematic for 19+ extra LLM round trips (e.g. iteration 3
+        # succeeded, but it kept refining resistor values/footprints
+        # without ever calling build_and_check_pcb until iteration 23),
+        # since nothing signaled "this step is done, move forward."
+        schematic_just_succeeded = any(
+            r["name"] == "build_and_simulate_schematic" and (r["output"].get("schematic") or {}).get("success")
+            for r in results
+        )
+        next_step_hint = (
+            "\n\nThe schematic succeeded. Do NOT keep refining it further unless a later step "
+            "reveals a real problem -- call build_and_check_pcb next to place components and "
+            "check the physical board."
+        ) if schematic_just_succeeded else ""
+        conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}{next_step_hint}"})
         # Store a SIZE-BOUNDED summary of results in history, not the raw
         # output -- a run that hit an out-of-memory kill at iteration 55
         # (process RSS grew from ~700MB at iteration 8 to 3.7GB, exceeding
