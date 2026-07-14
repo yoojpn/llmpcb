@@ -345,6 +345,108 @@ def find_unconnected_usb_c_cc_pins(netlist_path: str) -> list[dict]:
     return issues
 
 
+def _get_pin_names_for_part(part_value: str, work_dir: Path) -> dict[str, str]:
+    """Look up the REAL pin-number -> pin-name mapping from the actual
+    .kicad_sym file used for this part (e.g. {'14': 'IO12', '35':
+    'TXD0/IO1', '1': 'GND'}), rather than trusting whatever a net was
+    NAMED in the SKiDL code. Net names are an arbitrary label the
+    Designer chose and can be wrong (found via manual audit: a net named
+    'GND' actually connected pin 14 (IO12) and pin 35 (TXD0) on an
+    ESP32-WROOM-32E -- NEITHER is actually a ground pin per the real
+    datasheet-derived symbol, despite the misleading net name fooling
+    both the requirement-check and datasheet-check LLM verifications,
+    which were given the net's chosen name rather than cross-referencing
+    real pin function).
+    """
+    import re
+    parts_dir = work_dir / "parts"
+    if not parts_dir.exists():
+        return {}
+    for sym_file in parts_dir.glob("*.kicad_sym"):
+        text = sym_file.read_text(encoding="utf-8", errors="ignore")
+        marker = f'symbol "{part_value}"'
+        if marker not in text:
+            continue
+        # Use the *_1_1 sub-symbol block (pin definitions), not the *_0_1
+        # graphics-only block, and stop before the next top-level part.
+        start = text.find(f'symbol "{part_value}_1_1"')
+        if start == -1:
+            start = text.find(marker)
+        # crude but effective: find the next `\t\tsymbol "` at the same
+        # nesting depth (2 tabs) to bound this part's own pin block.
+        next_part = text.find('\n\t\tsymbol "', start + 1)
+        block = text[start:next_part] if next_part != -1 else text[start:start + 20000]
+        pins = re.findall(r'\(name "([^"]+)".*?\(number "([^"]+)"', block, re.DOTALL)
+        return {num: name for name, num in pins}
+    return {}
+
+
+_POWER_GROUND_KEYWORDS = ("GND", "VSS", "VCC", "VDD", "3V3", "5V", "AGND", "AVDD", "AVSS", "PWR", "EPAD")
+
+
+def find_pin_function_mismatches(netlist_path: str) -> list[dict]:
+    """Deterministic check: for every net, resolve each connected pin's
+    REAL function (from the actual .kicad_sym pin name, not the
+    Designer-chosen net name) and flag nets where multiple DIFFERENT,
+    non-power/ground signal pins are tied together -- regardless of what
+    the net happens to be named. This catches the case a net misleadingly
+    named 'GND' actually shorts two unrelated signal pins (e.g. IO12 and
+    TXD0) together, which an LLM judge given only the net's chosen name
+    can be fooled by, but real pin-function data cannot.
+    """
+    nets = get_netlist_nets(netlist_path)
+    work_dir = Path(netlist_path).resolve().parent
+    ref_to_part = {}
+    content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
+    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\).*?\(value "([^"]*)"\)', content, re.DOTALL):
+        ref_to_part[m.group(1)] = m.group(2)
+
+    pin_name_cache: dict[str, dict[str, str]] = {}
+    issues = []
+    for net_name, pin_list in nets.items():
+        real_names = []
+        for ref, pin_num in pin_list:
+            part_value = ref_to_part.get(ref)
+            if not part_value:
+                continue
+            if part_value not in pin_name_cache:
+                pin_name_cache[part_value] = _get_pin_names_for_part(part_value, work_dir)
+            real_name = pin_name_cache[part_value].get(str(pin_num))
+            if real_name:
+                real_names.append((ref, pin_num, real_name))
+
+        # Classify each real pin name as power/ground or signal.
+        signal_pins = [
+            (ref, pin_num, name) for ref, pin_num, name in real_names
+            if not any(kw in name.upper() for kw in _POWER_GROUND_KEYWORDS)
+            and not re.fullmatch(r"Pin_?\d+", name)  # generic header/connector
+            # passthrough pins have no inherent "function" of their own --
+            # their role is whatever they're wired to, not a fixed identity
+            # like a GPIO name, so they shouldn't count as a conflicting
+            # "different function" on a net.
+        ]
+        # Distinct signal pin NAMES (not just count) tied together on one
+        # net, where more than one part/pin-number is a genuine signal
+        # (not power/ground), is the anomaly worth flagging -- a single
+        # signal pin driving/receiving on a net is normal; two or more
+        # DIFFERENT signal pins (different real names) sharing a net
+        # almost always indicates a wiring mistake.
+        distinct_signal_names = set(name for _, _, name in signal_pins)
+        if len(signal_pins) >= 2 and len(distinct_signal_names) >= 2:
+            issues.append({
+                "net": net_name,
+                "pins": [(ref, pin_num, name) for ref, pin_num, name in signal_pins],
+                "note": (
+                    f"Net '{net_name}' ties together pins with DIFFERENT real functions per their "
+                    f"actual datasheet-derived pin names (not the net's own label): "
+                    f"{[(ref, pin_num, name) for ref, pin_num, name in signal_pins]}. "
+                    f"The net's name may be misleading -- verify these pins are genuinely meant "
+                    f"to be connected together; if not, this is a wiring bug."
+                ),
+            })
+    return issues
+
+
 def find_shorted_multipin_ic_gpios(netlist_path: str, ref_values: list[dict] = None) -> list[dict]:
     """Detect a distinct wiring mistake from find_shorted_two_pin_parts:
     a multi-pin IC/MCU (not a simple 2-terminal part) with two or more of
@@ -1132,6 +1234,8 @@ def _build_and_check_pcb_impl(netlist_path: str, board_width_mm: float = None, b
     if drc_result is not None:
         drc_result["advisory_warnings"] = [
             s["note"] for s in find_shorted_multipin_ic_gpios(netlist_path)
+        ] + [
+            s["note"] for s in find_pin_function_mismatches(netlist_path)
         ]
     return {"layout": layout_result, "routing": routing_result, "drc": drc_result}
 
