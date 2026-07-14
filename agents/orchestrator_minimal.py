@@ -582,6 +582,20 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                 # routing.success must be true for the board to actually
                 # be considered done, not just DRC's violation count.
                 routing_ok = routing.get("success", False)
+                # Identify which specific pin-pairs are unconnected, so we
+                # can detect the SAME connection failing to route across
+                # multiple build_and_check_pcb calls -- found via manual
+                # audit: J1 pad B5 / R2 pad 1 (net N$2) remained unconnected
+                # identically across 9 consecutive PCB checks while the
+                # Designer kept "fixing" the schematic each time (which was
+                # never the actual problem -- Freerouting was failing to
+                # route that one specific connection, a routing/placement
+                # issue, not a schematic wiring issue).
+                unconnected_pairs = set()
+                for v in blocking_violations:
+                    if v.get("type") == "unconnected_item":
+                        pair = tuple(sorted(item.get("description", "") for item in v.get("items", [])))
+                        unconnected_pairs.add(pair)
                 history.append({
                     "iteration": i,
                     "drc_clean": (
@@ -595,6 +609,7 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     "components": ref_values,
                     "netlist_path": netlist_path,
                     "advisory_warnings": drc.get("advisory_warnings", []),
+                    "unconnected_pairs": list(unconnected_pairs),
                 })
 
         # If the schematic just succeeded, explicitly tell the Designer to
@@ -613,6 +628,32 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             "reveals a real problem -- call build_and_check_pcb next to place components and "
             "check the physical board."
         ) if schematic_just_succeeded else ""
+
+        # Detect the SAME specific pin-pair remaining unconnected across
+        # consecutive build_and_check_pcb calls -- a strong signal that
+        # this is a ROUTING/placement problem (Freerouting failing to find
+        # a path for that one connection), not a schematic wiring problem,
+        # even though it surfaces as "unconnected" which looks similar to
+        # a real schematic bug. Editing the SKiDL code repeatedly does not
+        # fix this; the fix is more physical room for the router.
+        pcb_just_checked = any(r["name"] == "build_and_check_pcb" for r in results)
+        if pcb_just_checked:
+            prior_pcb_checks = [h for h in history if "unconnected_pairs" in h]
+            if len(prior_pcb_checks) >= 2:
+                current_pairs = set(tuple(p) for p in prior_pcb_checks[-1].get("unconnected_pairs", []))
+                previous_pairs = set(tuple(p) for p in prior_pcb_checks[-2].get("unconnected_pairs", []))
+                recurring = current_pairs & previous_pairs
+                if recurring:
+                    next_step_hint += (
+                        f"\n\nIMPORTANT: The exact same connection(s) have remained unconnected across "
+                        f"multiple PCB checks: {list(recurring)}. This is almost certainly a ROUTING "
+                        f"problem (the auto-router can't find physical room for this specific trace), "
+                        f"NOT a schematic wiring problem -- the netlist connection itself is likely "
+                        f"already correct. Editing the SKiDL schematic again will not fix this. Instead, "
+                        f"call build_and_check_pcb again with a SIGNIFICANTLY larger board size (e.g. "
+                        f"2x the previous width and height) to give the router more room."
+                    )
+
         conversation.append({"role": "user", "content": f"Tool results:\n{json.dumps(results, ensure_ascii=False, default=str)[:3000]}{next_step_hint}"})
         # Store a SIZE-BOUNDED summary of results in history, not the raw
         # output -- a run that hit an out-of-memory kill at iteration 55
