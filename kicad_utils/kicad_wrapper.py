@@ -389,6 +389,8 @@ def _get_pin_names_for_part(part_value: str, work_dir: Path, lib_name: str = Non
 _POWER_GROUND_KEYWORDS = ("GND", "VSS", "VCC", "VDD", "3V3", "5V", "AGND", "AVDD", "AVSS", "PWR", "EPAD")
 
 
+
+
 def find_pin_function_mismatches(netlist_path: str) -> list[dict]:
     """Deterministic check: for every net, resolve each connected pin's
     REAL function (from the actual .kicad_sym pin name, not the
