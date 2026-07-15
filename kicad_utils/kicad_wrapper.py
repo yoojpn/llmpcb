@@ -1312,7 +1312,7 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
     queue = ctx.Queue()
     proc = ctx.Process(target=_mp_worker, args=("_build_and_check_pcb_impl", kwargs, queue))
     proc.start()
-    proc.join(timeout=350)
+    proc.join(timeout=420)
     if proc.is_alive():
         proc.terminate()
         proc.join()
@@ -1349,14 +1349,26 @@ def _build_and_check_pcb_impl(netlist_path: str, board_width_mm: float = None, b
     if not skip_routing:
         routing_result = route_pcb(layout_result["pcb_path"])
         # If Freerouting didn't fully complete on the first attempt, retry
-        # once with more passes -- found via manual audit: a moderately
-        # dense board (USB-C + several passives) left 6 nets unrouted on
-        # the first pass, previously silently reported as success=True.
-        # A second pass with a higher pass budget often closes the gap
-        # without needing the Designer to change anything (this is a
-        # router-effort issue, not a design issue).
+        # with a LARGER board (not just more passes) -- research on
+        # Freerouting's real-world behavior confirms it's a known,
+        # structural limitation on dense boards ("FreeRouting failed to
+        # route 4 nets... another tool routed all tracks" -- a documented
+        # comparison, not unique to our setup), and the single most
+        # reliable lever available is giving the router more physical
+        # room, not just more compute time on the same tight board.
+        # Re-run PLACEMENT with 50% more board area, then retry routing on
+        # that larger board.
         if routing_result and not routing_result.get("success"):
-            routing_result = route_pcb(layout_result["pcb_path"], max_passes=40, timeout_s=150)
+            larger_layout = generate_pcb_layout(
+                netlist_path,
+                board_width_mm=(board_width_mm or layout_result.get("required_width_mm", 50)) * 1.5,
+                board_height_mm=(board_height_mm or layout_result.get("required_height_mm", 50)) * 1.5,
+                mounting_holes=mounting_holes, footprint_search_dirs=footprint_search_dirs,
+                part_clearance_mm=part_clearance_mm, hole_keepout_margin_mm=hole_keepout_margin_mm,
+            )
+            if larger_layout.get("success"):
+                layout_result = larger_layout
+                routing_result = route_pcb(layout_result["pcb_path"], max_passes=40, timeout_s=150)
 
     drc_result = run_drc_check(layout_result["pcb_path"])
     shorted = find_shorted_two_pin_parts(netlist_path)
