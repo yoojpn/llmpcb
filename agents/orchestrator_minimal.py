@@ -259,6 +259,33 @@ def _interview_if_needed(user_request: str, client) -> str:
     return user_request
 
 
+def _generate_code_level_fix(problem_description: str, current_code: str, client) -> str:
+    """When the SAME verification failure recurs across multiple checks
+    (the Designer isn't converging on a fix), close the "observability
+    gap" identified in recent research on LLM repair-loop convergence:
+    output-level feedback (a prose description of what's electrically
+    wrong) doesn't reliably map back to the specific code change needed,
+    causing persistent failure-mode oscillation rather than convergence.
+    Injecting concrete CODE-LEVEL knowledge (the exact lines to change)
+    restores convergence far more reliably than repeating the symptom
+    description. This asks the model to produce an EXACT patch, not
+    another restatement of the problem.
+    """
+    prompt = (
+        "The SAME wiring problem has been flagged repeatedly across multiple fix "
+        "attempts on this SKiDL code, meaning prose-level feedback alone isn't "
+        "converging on a fix. Given the actual current SKiDL code and the exact "
+        "problem, identify the SPECIFIC line(s) that need to change and state "
+        "EXACTLY what they should become (e.g. 'change `q1[\"G\"] += sda` to "
+        "`q1[\"G\"] += esp32[\"IO4\"]` -- IO4 is not used elsewhere in this design'). "
+        "Be surgical: name the exact variable/pin/line, not a general description "
+        "of the electrical issue (that's already been stated and hasn't helped)."
+    )
+    content = f"Problem: {problem_description}\n\nCurrent SKiDL code:\n{current_code[:4000]}"
+    resp = client.call_interviewer(prompt, [{"role": "user", "content": content}])
+    return resp.get("content") or ""
+
+
 def _verify_against_datasheets(final_components: list[dict], nets_info: dict, client) -> tuple[bool, str]:
     """Generic (not connector-type-specific) wiring verification: for each
     non-trivial component (skip simple R/C/L/LED passives), re-fetch its
@@ -613,6 +640,22 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     prev_tokens = set(_re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", prev_explanation))
                     cur_tokens = set(_re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", explanation))
                     if len(prev_tokens & cur_tokens) >= 3:
+                        # Close the "observability gap" -- fetch the actual
+                        # current SKiDL code and ask for a surgical,
+                        # code-level patch instead of repeating the prose
+                        # symptom description that already failed to
+                        # produce a fix across multiple attempts.
+                        current_code = ""
+                        for h in reversed(history):
+                            for r in h.get("results", []):
+                                if r.get("name") == "build_and_simulate_schematic":
+                                    current_code = r.get("args", {}).get("skidl_code", "")
+                                    break
+                            if current_code:
+                                break
+                        code_fix = ""
+                        if current_code:
+                            code_fix = _generate_code_level_fix(explanation, current_code, client)
                         repeat_failure_hint = (
                             "\n\nIMPORTANT: This is the SAME problem flagged in a previous check "
                             "(overlapping component/net names), meaning the last fix attempt did NOT "
@@ -621,6 +664,7 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                             "this design first, then pick a genuinely UNUSED pin number for the "
                             "conflicting connection. Double-check the new SKiDL code actually changes "
                             "the pin number before rebuilding."
+                            + (f"\n\nSuggested specific code-level fix:\n{code_fix}" if code_fix else "")
                         )
                 conversation.append({
                     "role": "user",
@@ -800,13 +844,19 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
         # all, unlike the full orchestrator which has offload/compression
         # mechanisms. This keeps history usable for debugging without the
         # unbounded growth.
-        def _bound_result_sizes(obj, max_len=500):
+        def _bound_result_sizes(obj, max_len=500, key=None):
             if isinstance(obj, str):
+                # skidl_code is exempted from truncation -- needed intact
+                # by _generate_code_level_fix for repeated-failure recovery
+                # (see _verify_requirements), and 500 chars would cut off
+                # all but the shortest schematics.
+                if key == "skidl_code":
+                    return obj
                 return obj if len(obj) <= max_len else obj[:max_len] + f"...({len(obj)} chars total)"
             if isinstance(obj, dict):
-                return {k: _bound_result_sizes(v, max_len) for k, v in obj.items()}
+                return {k: _bound_result_sizes(v, max_len, key=k) for k, v in obj.items()}
             if isinstance(obj, list):
-                return [_bound_result_sizes(v, max_len) for v in obj]
+                return [_bound_result_sizes(v, max_len, key=key) for v in obj]
             return obj
 
         history.append({
