@@ -345,39 +345,44 @@ def find_unconnected_usb_c_cc_pins(netlist_path: str) -> list[dict]:
     return issues
 
 
-def _get_pin_names_for_part(part_value: str, work_dir: Path) -> dict[str, str]:
-    """Look up the REAL pin-number -> pin-name mapping from the actual
-    .kicad_sym file used for this part (e.g. {'14': 'IO12', '35':
-    'TXD0/IO1', '1': 'GND'}), rather than trusting whatever a net was
-    NAMED in the SKiDL code. Net names are an arbitrary label the
-    Designer chose and can be wrong (found via manual audit: a net named
-    'GND' actually connected pin 14 (IO12) and pin 35 (TXD0) on an
-    ESP32-WROOM-32E -- NEITHER is actually a ground pin per the real
-    datasheet-derived symbol, despite the misleading net name fooling
-    both the requirement-check and datasheet-check LLM verifications,
-    which were given the net's chosen name rather than cross-referencing
-    real pin function).
+def _get_pin_names_for_part(part_value: str, work_dir: Path, lib_name: str = None) -> dict[str, str]:
+    """Look up the REAL pin-number -> pin-name mapping for this part, using
+    SKiDL's OWN Part() resolution rather than a hand-rolled regex parser --
+    a regex-based reader was found to DISAGREE with SKiDL's actual pin
+    resolution for symbols using `(extends "Base")` inheritance (e.g. for
+    BSS84, the regex read pin2=D/pin3=S, but SKiDL itself resolves
+    pin2=S/pin3=D -- a genuine mismatch that produced a false-positive
+    wiring-bug report, since re-implementing KiCad's symbol inheritance/
+    alternate-pin resolution by hand doesn't reliably match the real
+    library behavior). SKiDL is what actually generates the netlist, so
+    it's the authoritative source of truth for pin mapping, not a
+    reimplementation of it.
     """
-    import re
+    import os
     parts_dir = work_dir / "parts"
     if not parts_dir.exists():
         return {}
-    for sym_file in parts_dir.glob("*.kicad_sym"):
-        text = sym_file.read_text(encoding="utf-8", errors="ignore")
-        marker = f'symbol "{part_value}"'
-        if marker not in text:
+    candidates = []
+    if lib_name:
+        candidates.append(parts_dir / f"{lib_name}.kicad_sym")
+    candidates.extend(parts_dir.glob("*.kicad_sym"))
+    seen = set()
+    for sym_file in candidates:
+        if sym_file in seen or not sym_file.exists():
             continue
-        # Use the *_1_1 sub-symbol block (pin definitions), not the *_0_1
-        # graphics-only block, and stop before the next top-level part.
-        start = text.find(f'symbol "{part_value}_1_1"')
-        if start == -1:
-            start = text.find(marker)
-        # crude but effective: find the next `\t\tsymbol "` at the same
-        # nesting depth (2 tabs) to bound this part's own pin block.
-        next_part = text.find('\n\t\tsymbol "', start + 1)
-        block = text[start:next_part] if next_part != -1 else text[start:start + 20000]
-        pins = re.findall(r'\(name "([^"]+)".*?\(number "([^"]+)"', block, re.DOTALL)
-        return {num: name for name, num in pins}
+        seen.add(sym_file)
+        text = sym_file.read_text(encoding="utf-8", errors="ignore")
+        if f'symbol "{part_value}"' not in text:
+            continue
+        try:
+            import skidl as _skidl
+            env = os.environ.copy()
+            for var in ("KICAD9_SYMBOL_DIR", "KICAD8_SYMBOL_DIR", "KICAD7_SYMBOL_DIR", "KICAD6_SYMBOL_DIR", "KICAD_SYMBOL_DIR"):
+                os.environ.setdefault(var, "/usr/share/kicad/symbols")
+            p = _skidl.Part(str(sym_file), part_value)
+            return {str(pin.num): pin.name for pin in p.pins}
+        except Exception:
+            continue
     return {}
 
 
@@ -397,9 +402,11 @@ def find_pin_function_mismatches(netlist_path: str) -> list[dict]:
     nets = get_netlist_nets(netlist_path)
     work_dir = Path(netlist_path).resolve().parent
     ref_to_part = {}
+    ref_to_lib = {}
     content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
-    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\).*?\(value "([^"]*)"\)', content, re.DOTALL):
+    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\).*?\(value "([^"]*)"\).*?\(libsource\s*\(lib "([^"]*)"\)', content, re.DOTALL):
         ref_to_part[m.group(1)] = m.group(2)
+        ref_to_lib[m.group(1)] = m.group(3)
 
     pin_name_cache: dict[str, dict[str, str]] = {}
     issues = []
@@ -409,9 +416,10 @@ def find_pin_function_mismatches(netlist_path: str) -> list[dict]:
             part_value = ref_to_part.get(ref)
             if not part_value:
                 continue
-            if part_value not in pin_name_cache:
-                pin_name_cache[part_value] = _get_pin_names_for_part(part_value, work_dir)
-            real_name = pin_name_cache[part_value].get(str(pin_num))
+            cache_key = f"{ref_to_lib.get(ref, '')}:{part_value}"
+            if cache_key not in pin_name_cache:
+                pin_name_cache[cache_key] = _get_pin_names_for_part(part_value, work_dir, lib_name=ref_to_lib.get(ref))
+            real_name = pin_name_cache[cache_key].get(str(pin_num))
             if real_name:
                 real_names.append((ref, pin_num, real_name))
 
