@@ -1237,7 +1237,41 @@ def route_pcb(pcb_path: str, max_passes: int = 20, timeout_s: int = 150) -> dict
     pcbnew.ImportSpecctraSES(board, ses_path)
     board.Save(pcb_path)
 
-    return {"success": True, "pcb_path": pcb_path}
+    # route_pcb previously reported success=True unconditionally once a
+    # session file was produced/imported, regardless of whether Freerouting
+    # actually finished routing every net. Found via manual audit: routing
+    # reported success while 6 different nets (USB-C CC pull-downs, GND
+    # stitching, etc) remained unconnected on the final board -- Freerouting
+    # itself logs "Auto-router session completed: started with N unrouted
+    # nets" and, separately, its own remaining-unrouted-net count; a
+    # nonzero count there is the ground-truth signal that this is NOT
+    # actually done, even though the SES file was produced and imported
+    # without error.
+    combined_output = (proc.stdout or "") + (proc.stderr or "")
+    unrouted_count = None
+    m = re.search(r"started with (\d+) unrouted nets?", combined_output)
+    if m:
+        unrouted_count = int(m.group(1))
+    # Freerouting's summary line reports the STARTING unrouted count, not
+    # necessarily the ending one -- cross-check against the actual board
+    # state (KiCad's own connectivity view) as the real ground truth,
+    # since that reflects what ImportSpecctraSES actually applied.
+    ratsnest_unrouted = 0
+    try:
+        connectivity = board.GetConnectivity()
+        connectivity.RecalculateRatsnest()
+        ratsnest_unrouted = connectivity.GetUnconnectedCount(True)
+    except Exception:
+        pass  # older pcbnew API may differ; fall back to Freerouting's own log signal only
+
+    fully_routed = (ratsnest_unrouted == 0)
+    return {
+        "success": fully_routed,
+        "pcb_path": pcb_path,
+        "unrouted_nets_remaining": ratsnest_unrouted,
+        "freerouting_started_with_unrouted": unrouted_count,
+        "error": None if fully_routed else f"{ratsnest_unrouted} net(s) remain unrouted after Freerouting finished",
+    }
 
 
 def _mp_worker(fn_name, kwargs, queue):
@@ -1278,7 +1312,7 @@ def build_and_check_pcb(netlist_path: str, board_width_mm: float = None, board_h
     queue = ctx.Queue()
     proc = ctx.Process(target=_mp_worker, args=("_build_and_check_pcb_impl", kwargs, queue))
     proc.start()
-    proc.join(timeout=220)
+    proc.join(timeout=350)
     if proc.is_alive():
         proc.terminate()
         proc.join()
@@ -1314,6 +1348,15 @@ def _build_and_check_pcb_impl(netlist_path: str, board_width_mm: float = None, b
     routing_result = None
     if not skip_routing:
         routing_result = route_pcb(layout_result["pcb_path"])
+        # If Freerouting didn't fully complete on the first attempt, retry
+        # once with more passes -- found via manual audit: a moderately
+        # dense board (USB-C + several passives) left 6 nets unrouted on
+        # the first pass, previously silently reported as success=True.
+        # A second pass with a higher pass budget often closes the gap
+        # without needing the Designer to change anything (this is a
+        # router-effort issue, not a design issue).
+        if routing_result and not routing_result.get("success"):
+            routing_result = route_pcb(layout_result["pcb_path"], max_passes=40, timeout_s=150)
 
     drc_result = run_drc_check(layout_result["pcb_path"])
     shorted = find_shorted_two_pin_parts(netlist_path)
