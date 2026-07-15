@@ -349,57 +349,88 @@ def _verify_requirements(requirements: str, final_components: list[dict], client
     required push-button function left completely unwired -- not just
     "is the right component type present" (a part can be present and still
     be wired wrong, as found via manual datasheet-trace audit in practice).
+
+    Uses STRUCTURED per-requirement JSON output rather than one holistic
+    prose PASS/FAIL -- per 2026 LLM-as-judge research, a single free-form
+    verdict lets the model rationalize a weak point away using the
+    narrative momentum of other strong points (observed in practice: a
+    design where the sensor was a real IC but the display was just a
+    generic 4-pin header still got an overall PASS, with the model calling
+    the header "appropriate for an external display" despite an explicit
+    rule against it). Forcing an independent PASS/FAIL verdict for EACH
+    extracted requirement, one at a time, removes that rationalization
+    path -- a weak requirement can't hide behind strong ones when it has
+    to stand on its own.
     Returns (passed, explanation).
     """
+    import re as _re
+    # Split the bullet-point requirements text into individual items.
+    req_items = [
+        line.strip().lstrip("*-•").strip()
+        for line in requirements.split("\n")
+        if line.strip() and (line.strip().startswith(("*", "-", "•")) or _re.match(r"^\d+[.)]", line.strip()))
+    ]
+    if not req_items:
+        req_items = [requirements.strip()]
+
     prompt = (
-        "Compare this list of functional requirements against the ACTUAL "
-        "components AND their actual net connections in the final board "
-        "(from the real generated netlist, not memory). IMPORTANT: a "
-        "generic connector/pin-header (e.g. 'Conn_01x04_Pin') does NOT "
-        "satisfy a requirement for a specific integrated component (a "
-        "sensor IC, display IC, etc) unless the user's original request "
-        "explicitly asked for a breakout header or external module "
-        "connector -- check the component VALUES/part numbers, not just "
-        "the count of connectors, to confirm the real IC is actually on "
-        "the board. Check not just "
-        "that the right component TYPES are present, but that they are "
-        "actually wired correctly for their stated purpose -- e.g. if a "
-        "rotary encoder is required, check its A/B/common pins each go to "
-        "a DIFFERENT net (not the same net as each other, and not shorted "
-        "to two different MCU pins simultaneously), and that any required "
-        "button/switch function has its pins actually connected to "
-        "something, not left floating. IMPORTANT: a net's NAME (e.g. "
-        "'GND') is just a label the Designer chose and can be WRONG -- "
-        "if an advisory warning shows the pins' REAL datasheet-derived "
-        "names (e.g. a net called 'GND' actually connecting an IO12 pin "
-        "and a TXD0 pin, neither of which is really ground), trust the "
-        "real pin names over the net's label. Advisory warnings (if any) "
-        "flag specific pins that may be shorted together -- use your "
-        "judgment on whether each is a real bug or a legitimate design "
-        "pattern (e.g. tying an LDO's EN pin to VIN to keep it "
-        "always-enabled is correct, as is using a GPIO for a bus function "
-        "like SCL/SDA even though its real pin name differs from the bus "
-        "net's name). Reply with a short explanation, then end "
-        "with exactly one line: 'VERDICT: PASS' if everything is correct, "
-        "or 'VERDICT: FAIL' if a real problem is found."
+        "You will judge EACH functional requirement below INDEPENDENTLY, one at a "
+        "time, against the ACTUAL components AND net connections in the final "
+        "board (from the real generated netlist, not memory). Do NOT let a "
+        "strong result on one requirement influence your verdict on another -- "
+        "each must stand on its own. IMPORTANT: a generic connector/pin-header "
+        "(e.g. 'Conn_01x04_Pin') does NOT satisfy a requirement for a specific "
+        "integrated component (a sensor IC, display IC, etc) unless the "
+        "user's original request explicitly asked for a breakout header or "
+        "external module connector -- check the component VALUES/part "
+        "numbers, not just the presence of a connector. Check not just that "
+        "the right component TYPE is present, but that it is actually wired "
+        "correctly for its stated purpose (e.g. a rotary encoder's A/B/common "
+        "pins must each go to a DIFFERENT net, not shorted together or to two "
+        "different MCU pins; a required button must have its pins actually "
+        "connected). A net's NAME (e.g. 'GND') is just a label the Designer "
+        "chose and can be WRONG -- if an advisory warning shows a pin's REAL "
+        "datasheet-derived name conflicting with the net's label, trust the "
+        "real pin name. Advisory warnings may or may not be real bugs (e.g. "
+        "tying an LDO's EN to VIN, or using a GPIO for SCL/SDA, are both "
+        "legitimate) -- use judgment per-requirement, not globally.\n\n"
+        "Reply with ONLY a JSON array, one object per requirement listed below, "
+        "in the same order, each with exactly these fields: "
+        '{"requirement": "<short restatement>", "reasoning": "<your check>", '
+        '"verdict": "PASS" or "FAIL"}. No text outside the JSON array.'
     )
     try:
         nets_info = kicad_wrapper.get_netlist_nets(netlist_path) if netlist_path else {}
     except Exception:
         nets_info = {}
     content = (
-        f"Requirements:\n{requirements}\n\n"
-        f"Actual final components: {json.dumps(final_components, ensure_ascii=False)}\n\n"
-        f"Actual net connections: {json.dumps(nets_info, ensure_ascii=False)}\n\n"
-        f"Advisory warnings (may or may not be real bugs, use judgment): "
-        f"{json.dumps(advisory_warnings or [], ensure_ascii=False)}"
+        "Requirements (judge each independently):\n"
+        + "\n".join(f"{idx+1}. {item}" for idx, item in enumerate(req_items))
+        + "\n\n"
+        + f"Actual final components: {json.dumps(final_components, ensure_ascii=False)}\n\n"
+        + f"Actual net connections: {json.dumps(nets_info, ensure_ascii=False)}\n\n"
+        + f"Advisory warnings (may or may not be real bugs, use judgment): "
+        + f"{json.dumps(advisory_warnings or [], ensure_ascii=False)}"
     )
     resp = client.call_interviewer(prompt, [{"role": "user", "content": content}])
     text = resp.get("content") or ""
-    import re
-    m = re.search(r"VERDICT:\s*(PASS|FAIL)", text, re.IGNORECASE)
-    passed = bool(m and m.group(1).upper() == "PASS")
-    return passed, text
+    # Parse the structured per-requirement JSON array -- strip markdown
+    # code fences if the model wrapped it in ```json ... ``` despite the
+    # "no text outside the JSON array" instruction.
+    json_text = _re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+    try:
+        verdicts = json.loads(json_text)
+        passed = all(v.get("verdict", "").upper() == "PASS" for v in verdicts)
+        explanation = "\n".join(
+            f"[{v.get('verdict', '?')}] {v.get('requirement', '?')}: {v.get('reasoning', '')}"
+            for v in verdicts
+        )
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        # Fall back to loose text search if structured parsing fails --
+        # degrade gracefully rather than crash the whole run.
+        passed = "FAIL" not in text.upper()
+        explanation = text
+    return passed, explanation
 
 
 def _run_batch(user_request: str, client, conversation: list, requirements: str,
