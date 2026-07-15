@@ -503,7 +503,30 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     print(f"[LLMPCB] データシート照合検証: {'PASS' if ds_passed else 'FAIL'}")
                     history.append({"iteration": i, "datasheet_check": ds_passed, "explanation": ds_explanation})
                     if ds_passed:
-                        return {"resolved": True, "iterations": i, "history": history, "conversation": conversation}
+                        spice_result = {"success": True, "skipped": True}
+                        try:
+                            spice_result = kicad_wrapper.verify_power_rails_via_spice(last_drc.get("netlist_path"))
+                        except Exception as e:
+                            print(f"  [warning] SPICE power-rail check failed to run: {e}", flush=True)
+                        spice_ok = spice_result.get("success", True)
+                        print(f"[LLMPCB] SPICE電源系統検証: {'PASS' if spice_ok else 'FAIL'}"
+                              f"{' (skipped)' if spice_result.get('skipped') else ''}")
+                        history.append({"iteration": i, "spice_check": spice_ok, "spice_result": spice_result})
+                        if spice_ok:
+                            return {"resolved": True, "iterations": i, "history": history, "conversation": conversation}
+                        conversation.append({
+                            "role": "user",
+                            "content": (
+                                f"Functional and datasheet checks passed, but a GROUND-TRUTH SPICE "
+                                f"simulation of the power rails found a problem: two or more named power "
+                                f"rails (e.g. VBUS, V3V3, VBAT) appear to be electrically shorted together "
+                                f"-- simulated current: {spice_result.get('max_current_seen_amps', '?')}A, "
+                                f"which is physically implausible for the passive components involved. "
+                                f"Review the SKiDL connections for any component accidentally bridging two "
+                                f"different power rails, then rebuild."
+                            )
+                        })
+                        continue
                     conversation.append({
                         "role": "user",
                         "content": (

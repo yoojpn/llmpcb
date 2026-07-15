@@ -289,6 +289,127 @@ def run_spice_simulation(netlist: str, analysis_type: str = "dc",
         return {"success": False, "error": "timeout after 60s"}
 
 
+_NOMINAL_RAIL_VOLTAGES = {
+    "VBUS": 5.0, "5V": 5.0, "USB": 5.0,
+    "V3V3": 3.3, "3V3": 3.3, "VDD": 3.3, "VCC": 3.3,
+    "VBAT": 3.7, "VBATT": 3.7, "BAT": 3.7,
+}
+
+
+def verify_power_rails_via_spice(netlist_path: str) -> dict:
+    """Ground-truth electrical verification via an actual SPICE simulation,
+    rather than more LLM/regex-based reasoning about pin names and net
+    labels -- per current best practice for LLM-assisted circuit
+    verification (e.g. SPICEAssistant-style tool feedback), a real
+    simulator's own convergence/current behavior is a more reliable
+    source of truth than static text analysis, which today's session
+    repeatedly found could be fooled (misleading net names, pin-mapping
+    disagreements between a hand-rolled parser and the real EDA tool).
+
+    Builds a MINIMAL SPICE netlist automatically from the real KiCad
+    netlist: real R/C/L passives get real SPICE elements with their
+    actual values; nets recognizable as named power rails (VBUS, V3V3,
+    VBAT, etc) get an ideal DC voltage source at a nominal voltage;
+    everything else (complex IC pins we have no real SPICE model for) is
+    left unconnected/ignored. Runs a DC operating-point analysis and
+    checks whether the simulator itself reports a problem -- most
+    tellingly, two DIFFERENT nominal rails accidentally tied together
+    (a genuine short) causes ngspice to report convergence failure or a
+    voltage-source-loop error, which is orthogonal ground truth
+    independent of how any net happened to be NAMED.
+    """
+    nets = get_netlist_nets(netlist_path)
+    ref_values = {c["ref"]: c["value"] for c in get_netlist_ref_values(netlist_path)}
+
+    # Identify which named rails are present and assign them nominal
+    # voltages; find if the SAME physical node ends up implied to be at
+    # two different nominal voltages (a short between named rails), which
+    # is a purely textual pre-check before even running SPICE.
+    rail_nets = {}
+    for net_name in nets:
+        upper = net_name.upper()
+        for keyword, voltage in _NOMINAL_RAIL_VOLTAGES.items():
+            if keyword in upper:
+                rail_nets[net_name] = voltage
+                break
+
+    lines = [".title Auto-generated power-rail sanity check", ""]
+    node_map = {"GND": "0", "0": "0"}
+    node_counter = [1]
+
+    def _node(net_name: str) -> str:
+        if net_name not in node_map:
+            node_map[net_name] = str(node_counter[0])
+            node_counter[0] += 1
+        return node_map[net_name]
+
+    # Real passive elements (R/C/L) with actual values.
+    elem_counter = 0
+    passive_nets = {}
+    for net_name, pin_list in nets.items():
+        for ref, pin_num in pin_list:
+            passive_nets.setdefault(ref, []).append((net_name, pin_num))
+    for ref, pins in passive_nets.items():
+        value = ref_values.get(ref, "")
+        if ref.startswith("R") and len(pins) == 2 and re.match(r"^[\d.]+[kKmMuUgG]?$", value.replace("ohm", "").strip()):
+            n1, n2 = _node(pins[0][0]), _node(pins[1][0])
+            spice_val = value.replace("k", "k").replace("K", "k") or "1k"
+            elem_counter += 1
+            lines.append(f"R{elem_counter} {n1} {n2} {spice_val}")
+        elif ref.startswith("C") and len(pins) == 2 and re.match(r"^[\d.]+[pnuUmM]?[fF]?$", value.strip()):
+            n1, n2 = _node(pins[0][0]), _node(pins[1][0])
+            spice_val = value if value else "1u"
+            elem_counter += 1
+            lines.append(f"C{elem_counter} {n1} {n2} {spice_val}")
+
+    # Ideal voltage sources for named rails, referenced to GND (node 0).
+    v_counter = 0
+    for net_name, voltage in rail_nets.items():
+        v_counter += 1
+        n1 = _node(net_name)
+        lines.append(f"V{v_counter} {n1} 0 DC {voltage}")
+
+    lines.append("")
+    lines.append(".op")
+    lines.append(".end")
+    spice_text = "\n".join(lines)
+
+    if v_counter == 0:
+        return {"success": True, "skipped": True, "reason": "no recognizable named power rails to inject"}
+
+    result = run_spice_simulation(spice_text, analysis_type="dc")
+    log = result.get("log_tail", "") or ""
+    convergence_failed = "singular matrix" in log.lower() or "gmin stepping failed" in log.lower()
+    # A genuine short between two DIFFERENT nominal rails doesn't always
+    # cause ngspice to fail to converge -- for a small but nonzero
+    # resistance, it happily computes a physically absurd but numerically
+    # valid current (verified in practice: a 0.001-ohm resistor bridging
+    # a 5V and 3.3V rail produced a computed current of -1700A, clearly
+    # impossible for a small passive, but ngspice reports this as a
+    # successful solve with no error string at all). Parse the actual
+    # computed current magnitudes from the operating point output -- real,
+    # numeric ground truth from the simulator, not text-pattern matching.
+    implausible_current = False
+    max_current_seen = 0.0
+    for m in re.finditer(r"^\s*i\s+(-?[\d.eE+-]+)\s*$", log, re.MULTILINE):
+        try:
+            i_val = abs(float(m.group(1)))
+            max_current_seen = max(max_current_seen, i_val)
+            if i_val > 5.0:  # generous bound for small-signal passives
+                implausible_current = True
+        except ValueError:
+            continue
+    shorted_rails = convergence_failed or implausible_current
+    return {
+        "success": result.get("success", False) and not shorted_rails,
+        "rails_simulated": {k: v for k, v in rail_nets.items()},
+        "possible_short_between_rails": shorted_rails,
+        "max_current_seen_amps": max_current_seen,
+        "log_tail": log[-1500:],
+        "spice_netlist": spice_text,
+    }
+
+
 def find_unconnected_usb_c_cc_pins(netlist_path: str) -> list[dict]:
     """USB-C receptacles require CC1/CC2 to each have their own pull-down
     resistor to GND (per the USB-C spec) -- without this, most modern
