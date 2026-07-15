@@ -558,6 +558,28 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                             )
                         })
                         continue
+                    # Detect the SAME datasheet-check failure recurring
+                    # across consecutive checks -- the same principle
+                    # already applied to requirement_check below, extended
+                    # here since it was found to have the identical gap:
+                    # observed 6 consecutive "データシート照合検証: FAIL"
+                    # results in a row with no forward progress.
+                    prior_ds_checks = [h for h in history if "datasheet_check" in h and not h["datasheet_check"]]
+                    ds_repeat_hint = ""
+                    if len(prior_ds_checks) >= 2:
+                        prev_ds_explanation = prior_ds_checks[-2].get("explanation", "")
+                        import re as _re2
+                        prev_tokens = set(_re2.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", prev_ds_explanation))
+                        cur_tokens = set(_re2.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", ds_explanation))
+                        if len(prev_tokens & cur_tokens) >= 3:
+                            ds_repeat_hint = (
+                                "\n\nIMPORTANT: This is the SAME datasheet-check problem flagged in a "
+                                "previous check (overlapping component/net names) -- the last fix attempt "
+                                "did not actually resolve it. Re-read the datasheet excerpt carefully for "
+                                "the EXACT pin name/number required, verify your SKiDL code uses that "
+                                "exact pin, and confirm the new code actually differs from the previous "
+                                "attempt before rebuilding."
+                            )
                     conversation.append({
                         "role": "user",
                         "content": (
@@ -569,7 +591,7 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                             f"full-featured data receptacle just because its datasheet documents optional "
                             f"data-line pins your design doesn't use). Add only what the cross-check "
                             f"actually flagged as missing, keeping everything else in the design the same, "
-                            f"then rebuild the schematic and PCB."
+                            f"then rebuild the schematic and PCB.{ds_repeat_hint}"
                         )
                     })
                     continue
