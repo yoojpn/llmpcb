@@ -376,7 +376,10 @@ def _verify_requirements(requirements: str, final_components: list[dict], client
         "with exactly one line: 'VERDICT: PASS' if everything is correct, "
         "or 'VERDICT: FAIL' if a real problem is found."
     )
-    nets_info = kicad_wrapper.get_netlist_nets(netlist_path) if netlist_path else {}
+    try:
+        nets_info = kicad_wrapper.get_netlist_nets(netlist_path) if netlist_path else {}
+    except Exception:
+        nets_info = {}
     content = (
         f"Requirements:\n{requirements}\n\n"
         f"Actual final components: {json.dumps(final_components, ensure_ascii=False)}\n\n"
@@ -485,7 +488,10 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                 print(f"[LLMPCB] 機能要件の最終確認: {'PASS' if passed else 'FAIL'}")
                 history.append({"iteration": i, "requirement_check": passed, "explanation": explanation})
                 if passed:
-                    nets_info = kicad_wrapper.get_netlist_nets(last_drc.get("netlist_path")) if last_drc.get("netlist_path") else {}
+                    try:
+                        nets_info = kicad_wrapper.get_netlist_nets(last_drc.get("netlist_path")) if last_drc.get("netlist_path") else {}
+                    except Exception:
+                        nets_info = {}
                     ds_passed, ds_explanation = _verify_against_datasheets(final_components, nets_info, client)
                     print(f"[LLMPCB] データシート照合検証: {'PASS' if ds_passed else 'FAIL'}")
                     history.append({"iteration": i, "datasheet_check": ds_passed, "explanation": ds_explanation})
@@ -595,7 +601,19 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                 layout = out.get("layout") or {}
                 routing = out.get("routing") or {}
                 netlist_path = tc["arguments"].get("netlist_path")
-                ref_values = kicad_wrapper.get_netlist_ref_values(netlist_path) if netlist_path else []
+                try:
+                    ref_values = kicad_wrapper.get_netlist_ref_values(netlist_path) if netlist_path else []
+                except Exception as e:
+                    # A crash here (e.g. netlist_path pointing to a file
+                    # that doesn't exist at this exact path/cwd) previously
+                    # took down the ENTIRE run with an unhandled traceback,
+                    # losing all progress from a 60-iteration run. Degrade
+                    # gracefully instead -- treat it as if the check
+                    # couldn't run yet, which the existing missing_footprint/
+                    # drc_clean=False handling already knows how to nudge
+                    # the Designer past.
+                    ref_values = []
+                    print(f"  [warning] get_netlist_ref_values failed for {netlist_path!r}: {e}", flush=True)
                 missing_fp = layout.get("components_missing_footprint") or []
                 # Purely cosmetic/manufacturing-appearance DRC types that
                 # don't affect whether the board is electrically correct
