@@ -150,6 +150,12 @@ reference and will crash with "TypeError: 'float' object is not iterable".
 Check a connector's actual pin numbers/names from its footprint search
 result before wiring it, rather than guessing pin numbers.
 
+A MOSFET gate or an IC's enable/chip-select pin must NEVER be connected to
+a communication bus signal (I2C SDA/SCL, UART TX/RX, SPI) -- its logic
+level must reflect deliberate control (a dedicated GPIO, or a fixed rail
+for always-on), not fluctuate with unrelated bus traffic. This is checked
+automatically and will block completion if violated.
+
 For simple series chains (e.g. power -> resistor -> LED -> ground), PREFER
 SKiDL's chain operator over manual pin-by-pin +=: `vcc & r1 & led1 & gnd`
 connects them in series automatically and is much harder to get wrong than

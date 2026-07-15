@@ -485,7 +485,15 @@ def _get_pin_names_for_part(part_value: str, work_dir: Path, lib_name: str = Non
         return {}
     candidates = []
     if lib_name:
-        candidates.append(parts_dir / f"{lib_name}.kicad_sym")
+        # lib_name might already be a full/relative path (e.g.
+        # "_work/parts/C236917.kicad_sym" as literally written into the
+        # netlist's libsource field by some SKiDL Part() call styles),
+        # or just a bare library stem (e.g. "Transistor_FET") -- handle
+        # both rather than assuming one form.
+        lib_basename = Path(lib_name).stem
+        candidates.append(parts_dir / f"{lib_basename}.kicad_sym")
+        if Path(lib_name).is_absolute() or "/" in lib_name:
+            candidates.append(Path(lib_name))
     candidates.extend(parts_dir.glob("*.kicad_sym"))
     seen = set()
     for sym_file in candidates:
@@ -573,6 +581,103 @@ def find_pin_function_mismatches(netlist_path: str) -> list[dict]:
                     f"{[(ref, pin_num, name) for ref, pin_num, name in signal_pins]}. "
                     f"The net's name may be misleading -- verify these pins are genuinely meant "
                     f"to be connected together; if not, this is a wiring bug."
+                ),
+            })
+    return issues
+
+
+def _classify_pin_role(pin_name: str) -> str:
+    """Deterministic, zero-LLM-cost pin-role classification from the real
+    pin name (from _get_pin_names_for_part / SKiDL), inspired by recent
+    PCB-schematic-verification research (PCBSchemaGen's "schema-induced
+    pin-role ontology" + deterministic structural verifier) -- catching
+    wiring bugs via cheap, reusable rule-based classification rather than
+    an LLM call every time, so bad combinations are caught on the VERY
+    NEXT build_and_check_pcb rather than waiting for an expensive final
+    LLM verification pass several iterations later.
+    """
+    n = pin_name.upper()
+    if re.search(r"\b(GND|VSS|AGND|EPAD)\b", n):
+        return "ground"
+    if re.search(r"\b(VCC|VDD|V\d?V\d|3V3|5V|BAT|VIN|VOUT|PWR)\b", n):
+        return "power"
+    if re.fullmatch(r"SDA\d?", n) or "SDA" in n and "IO" not in n:
+        return "i2c_data"
+    if re.fullmatch(r"SCL\d?", n) or "SCL" in n and "IO" not in n:
+        return "i2c_clock"
+    if re.search(r"\b(TXD?\d?|UART_TX)\b", n):
+        return "uart_tx"
+    if re.search(r"\b(RXD?\d?|UART_RX)\b", n):
+        return "uart_rx"
+    if re.search(r"\b(MOSI|MISO|SCK|SPI_\w+)\b", n):
+        return "spi"
+    if re.fullmatch(r"EN|~?EN|CE|~?CE|~?CS\d?", n):
+        return "enable_control"
+    if re.match(r"^IO\d+", n) or re.match(r"^GPIO\d*", n):
+        return "gpio"
+    if n in ("G", "GATE"):
+        return "mosfet_gate"
+    if n in ("D", "DRAIN"):
+        return "mosfet_drain"
+    if n in ("S", "SOURCE"):
+        return "mosfet_source"
+    return "other"
+
+
+# Roles that a control-type pin (a MOSFET gate, or an IC's enable/chip-select
+# pin) should NEVER be driven by -- these are communication-bus signals
+# whose logic level reflects data traffic, not deliberate control intent.
+# A control pin tied to one of these is a near-certain wiring bug
+# regardless of which specific part types are involved (generalizes beyond
+# any single part family, unlike a per-part heuristic).
+_INCOMPATIBLE_CONTROL_SOURCE_ROLES = {"i2c_data", "i2c_clock", "uart_tx", "uart_rx", "spi"}
+_CONTROL_TARGET_ROLES = {"mosfet_gate", "enable_control"}
+
+
+def find_control_pin_bus_conflicts(netlist_path: str) -> list[dict]:
+    """Zero-LLM-cost, deterministic check: does any net connect a
+    CONTROL-type pin (a MOSFET gate, or an enable/chip-select pin) to a
+    COMMUNICATION-BUS pin (I2C SDA/SCL, UART TX/RX, SPI)? This is never
+    legitimate -- a control pin's logic level needs to reflect deliberate
+    intent (a GPIO driven by firmware, or tied to a fixed rail), not
+    fluctuate with unrelated bus traffic. Runs with zero LLM calls, so it
+    can be checked on EVERY build_and_check_pcb call rather than only
+    surfacing via an expensive final verification pass several iterations
+    later -- directly reduces iteration waste for this bug class.
+    """
+    nets = get_netlist_nets(netlist_path)
+    work_dir = Path(netlist_path).resolve().parent
+    ref_to_part = {}
+    content = Path(netlist_path).read_text(encoding="utf-8", errors="ignore")
+    for m in re.finditer(r'\(comp\s*\(ref "([^"]+)"\).*?\(value "([^"]*)"\).*?\(libsource\s*\(lib "([^"]*)"\)', content, re.DOTALL):
+        ref_to_part[m.group(1)] = (m.group(2), m.group(3))
+
+    pin_name_cache: dict[str, dict[str, str]] = {}
+    issues = []
+    for net_name, pin_list in nets.items():
+        roles_present = []
+        for ref, pin_num in pin_list:
+            part_value, lib_name = ref_to_part.get(ref, (None, None))
+            if not part_value:
+                continue
+            cache_key = f"{lib_name}:{part_value}"
+            if cache_key not in pin_name_cache:
+                pin_name_cache[cache_key] = _get_pin_names_for_part(part_value, work_dir, lib_name=lib_name)
+            real_name = pin_name_cache[cache_key].get(str(pin_num), "")
+            if real_name:
+                roles_present.append((ref, pin_num, real_name, _classify_pin_role(real_name)))
+
+        control_pins = [p for p in roles_present if p[3] in _CONTROL_TARGET_ROLES]
+        bus_pins = [p for p in roles_present if p[3] in _INCOMPATIBLE_CONTROL_SOURCE_ROLES]
+        if control_pins and bus_pins:
+            issues.append({
+                "net": net_name,
+                "note": (
+                    f"Net '{net_name}' connects a CONTROL pin ({control_pins}) directly to a "
+                    f"COMMUNICATION BUS pin ({bus_pins}). A gate/enable pin's state must reflect "
+                    f"deliberate control (a dedicated GPIO or fixed rail), not fluctuate with "
+                    f"unrelated bus traffic -- this is a wiring bug, not a legitimate pattern. "
+                    f"Move the control pin to its own dedicated net."
                 ),
             })
     return issues
@@ -1373,6 +1478,26 @@ def _build_and_check_pcb_impl(netlist_path: str, board_width_mm: float = None, b
     drc_result = run_drc_check(layout_result["pcb_path"])
     shorted = find_shorted_two_pin_parts(netlist_path)
     usb_c_cc_issues = find_unconnected_usb_c_cc_pins(netlist_path)
+    control_bus_conflicts = find_control_pin_bus_conflicts(netlist_path)
+    if control_bus_conflicts and drc_result:
+        # Zero-LLM-cost, deterministic, and effectively unambiguous (a
+        # control pin's level tracking bus traffic is never legitimate) --
+        # unlike find_shorted_multipin_ic_gpios below, this has no
+        # plausible false-positive pattern, so it's safe to block on
+        # rather than merely advise. Runs on every build_and_check_pcb
+        # call, catching this bug class on the very NEXT check instead of
+        # waiting for an expensive final LLM verification pass several
+        # iterations later (inspired by recent PCB-verification research
+        # favoring deterministic, zero-inference-cost structural checks
+        # over LLM judgment wherever a check can be made fully reliable).
+        drc_result["violation_count"] = drc_result.get("violation_count", 0) + len(control_bus_conflicts)
+        drc_result.setdefault("violations", [])
+        for c in control_bus_conflicts:
+            drc_result["violations"].append({
+                "type": "control_pin_bus_conflict",
+                "severity": "error",
+                "description": c["note"],
+            })
     if shorted and drc_result:
         # These are real functional bugs (a component wired to do nothing)
         # that standard DRC/ERC don't catch -- fold them into the DRC
