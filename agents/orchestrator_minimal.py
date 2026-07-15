@@ -617,8 +617,9 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                             f"part or footprint (e.g. do not replace a simple power connector with a "
                             f"full-featured data receptacle just because its datasheet documents optional "
                             f"data-line pins your design doesn't use). Add only what the cross-check "
-                            f"actually flagged as missing, keeping everything else in the design the same, "
-                            f"then rebuild the schematic and PCB.{ds_repeat_hint}"
+                            f"actually flagged as missing, keeping everything else in the design the same. "
+                            f"If this check lists MULTIPLE problems, fix ALL of them in this same rewrite "
+                            f"-- do not fix one and leave the rest for a later turn, then rebuild.{ds_repeat_hint}"
                         )
                     })
                     continue
@@ -670,8 +671,12 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
                     "role": "user",
                     "content": (
                         f"DRC is clean, but the design does not satisfy the stated functional "
-                        f"requirements: {explanation}\nFix the SKiDL code to add what's missing, "
-                        f"then rebuild the schematic and PCB.{repeat_failure_hint}"
+                        f"requirements: {explanation}\n"
+                        f"IMPORTANT: if MULTIPLE requirements failed above, fix ALL of them in "
+                        f"THIS SAME rewrite -- do not fix just one and rebuild, only to address the "
+                        f"next one in a separate turn later. Each turn spent re-checking an "
+                        f"unrelated already-identified problem wastes an iteration; batch all known "
+                        f"fixes into one SKiDL rewrite now.{repeat_failure_hint}"
                     )
                 })
                 continue
