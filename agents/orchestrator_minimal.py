@@ -157,8 +157,18 @@ specific pin by its NUMBER (an int or str like 1, "1", "VBUS") -- always
 index into the Part with [ ] to get a Pin object first. Never write
 `net += some_number` or `net += some_float` directly; that is not a pin
 reference and will crash with "TypeError: 'float' object is not iterable".
-Check a connector's actual pin numbers/names from its footprint search
-result before wiring it, rather than guessing pin numbers.
+
+MANDATORY before writing ANY connection code: for every non-trivial part
+(anything besides plain R/C/L/LED), you MUST have already called
+search_footprint_library for it and read its returned symbol_file/pin data
+in a PRIOR turn -- do NOT guess a pin name (e.g. writing usb_c["SHELL"]
+without having confirmed "SHELL" is a real pin on that exact symbol).
+Guessed pin names that don't exist are the single largest source of wasted
+iterations -- verify every pin name against real returned data first.
+Target completing the ENTIRE design in 10 iterations or fewer: get the
+SKiDL code right on the first or second attempt by using only VERIFIED
+pin names, rather than writing speculative code and fixing errors turn by
+turn.
 
 A MOSFET gate or an IC's enable/chip-select pin must NEVER be connected to
 a communication bus signal (I2C SDA/SCL, UART TX/RX, SPI) -- its logic

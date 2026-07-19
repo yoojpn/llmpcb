@@ -117,6 +117,13 @@ class FootprintSearchResult:
     footprint_ref: Optional[str] = None  # canonical "LibName:FootprintName"
     candidates: Optional[list] = None  # similar real part names found, if any
     datasheet_url: Optional[str] = None  # from the same LCSC page, when found via easyeda2kicad
+    pin_names: Optional[dict] = None  # {pin_number: pin_name} -- included directly
+    # so the Designer has EXACT pin names in hand at search time, rather
+    # than guessing (e.g. writing usb_c["SHELL"] when the real pin is
+    # named "SHIELD") and burning a whole iteration on a preventable
+    # crash. Found via live testing: 6 consecutive schematic-generation
+    # failures in one run traced directly to guessed, nonexistent pin
+    # names.
     notes: Optional[str] = None
 
 
@@ -220,6 +227,13 @@ def search_footprint_library(part_number: str, manufacturer: str = "",
                 m = re.search(r'\(symbol "([^"]+)"', sym_text)
                 if m:
                     symbol_name = m.group(1)
+            pin_names = None
+            if symbol_name and sym_file:
+                try:
+                    from kicad_utils.kicad_wrapper import _get_pin_names_for_part
+                    pin_names = _get_pin_names_for_part(symbol_name, Path(sym_file).parent.parent, lib_name=lcsc_id) or None
+                except Exception:
+                    pin_names = None
             result = FootprintSearchResult(
                 found=True,
                 source=f"easyeda2kicad_lcsc_{lcsc_id}",
@@ -228,6 +242,7 @@ def search_footprint_library(part_number: str, manufacturer: str = "",
                 footprint_file=fp_path,
                 footprint_ref=fp_ref,
                 datasheet_url=datasheet_url,
+                pin_names=pin_names,
             ).__dict__
             _log_tool_call("search_footprint_library", {"part_number": part_number}, result)
             return result
