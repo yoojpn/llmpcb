@@ -19,8 +19,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools import calculators, research
 from kicad_utils import kicad_wrapper
 from agents.gemini_client import LLMPCBGeminiClient
+try:
+    from agents.claude_client import LLMPCBClaudeClient
+except ImportError:
+    LLMPCBClaudeClient = None
 
-MAX_ITERATIONS = 20
+USE_CLAUDE = bool(os.environ.get("ANTHROPIC_API_KEY")) and os.environ.get("LLMPCB_MODEL", "").lower() == "claude"
+# Per explicit user instruction: keep the loop budget tighter when using
+# Claude Haiku 4.5 -- its higher first-attempt tool-calling accuracy
+# (per Anthropic's own benchmarks) should need fewer iterations to reach
+# the same result, so a smaller cap is both requested and appropriate
+# rather than just inheriting Gemini's looser budget.
+MAX_ITERATIONS = 15 if USE_CLAUDE else 20
 
 TOOLS = [
     {
@@ -919,7 +929,11 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
 
 
 def run(user_request: str) -> dict:
-    client = LLMPCBGeminiClient()
+    if USE_CLAUDE and LLMPCBClaudeClient is not None:
+        client = LLMPCBClaudeClient()
+        print("[LLMPCB] Claude Haiku 4.5 を使用します(ループ上限を抑えて実行)。")
+    else:
+        client = LLMPCBGeminiClient()
     user_request = _interview_if_needed(user_request, client)
     requirements = _extract_requirements(user_request, client)
     print(f"[LLMPCB] 機能要件チェックリスト:\n{requirements}\n")
@@ -931,7 +945,7 @@ def run(user_request: str) -> dict:
     all_history = []
     next_iteration = 1
     batch_count = 0
-    MAX_BATCHES_NONINTERACTIVE = 3  # safety cap when auto-continuing unattended (60 iterations total)
+    MAX_BATCHES_NONINTERACTIVE = 2 if USE_CLAUDE else 3  # safety cap when auto-continuing unattended
     while True:
         batch_count += 1
         result = _run_batch(user_request, client, conversation, requirements, next_iteration, MAX_ITERATIONS)
