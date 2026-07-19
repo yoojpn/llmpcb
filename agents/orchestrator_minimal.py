@@ -539,7 +539,15 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
         # rate as before this was added (1.47GB at iteration 24, nearly
         # identical to the original 1.5GB at iteration 23), because most
         # of a typical run's iterations don't end in a successful tool call.
-        MAX_CONVERSATION_MESSAGES = 40
+        # Anthropic bills by TOKEN volume (input+output), not by request
+        # count -- every turn re-sends the ENTIRE conversation history, so
+        # letting it grow to 40 messages means late iterations resend a
+        # much larger, costlier prompt than early ones (roughly quadratic
+        # cumulative token cost as iterations increase). Keep a tighter
+        # window for Claude specifically, per explicit user cost concern,
+        # since Claude's higher first-attempt accuracy should need less
+        # history to work effectively anyway.
+        MAX_CONVERSATION_MESSAGES = 20 if USE_CLAUDE else 40
         if len(conversation) > MAX_CONVERSATION_MESSAGES:
             conversation[:] = conversation[:1] + conversation[-(MAX_CONVERSATION_MESSAGES - 1):]
 
@@ -868,11 +876,36 @@ def _run_batch(user_request: str, client, conversation: list, requirements: str,
             r["name"] == "build_and_simulate_schematic" and (r["output"].get("schematic") or {}).get("success")
             for r in results
         )
-        next_step_hint = (
-            "\n\nThe schematic succeeded. Do NOT keep refining it further unless a later step "
-            "reveals a real problem -- call build_and_check_pcb next to place components and "
-            "check the physical board."
-        ) if schematic_just_succeeded else ""
+        early_wiring_issues = []
+        for r in results:
+            if r["name"] == "build_and_simulate_schematic":
+                issues = (r["output"].get("schematic") or {}).get("early_wiring_issues")
+                if issues:
+                    early_wiring_issues.extend(issues)
+        if early_wiring_issues:
+            # Catches wiring bugs (shorted 2-pin parts, control-pin/bus
+            # conflicts, missing USB-C CC pulldowns) IMMEDIATELY after
+            # schematic generation, before ever spending a slow PCB
+            # placement+routing cycle on a design that already has a known
+            # wiring bug -- directly reduces total loop count versus
+            # discovering these one at a time only inside the final PCB
+            # check, several expensive iterations later.
+            next_step_hint = (
+                "\n\nIMPORTANT: The schematic technically generated a netlist, but automated wiring "
+                "checks found real problems BEFORE spending time on PCB placement: "
+                + "; ".join(early_wiring_issues) +
+                "\nFix these in the SKiDL code and rebuild the schematic -- do NOT call "
+                "build_and_check_pcb yet, since PCB placement/routing time would be wasted on a "
+                "design with known wiring bugs."
+            )
+        elif schematic_just_succeeded:
+            next_step_hint = (
+                "\n\nThe schematic succeeded. Do NOT keep refining it further unless a later step "
+                "reveals a real problem -- call build_and_check_pcb next to place components and "
+                "check the physical board."
+            )
+        else:
+            next_step_hint = ""
 
         # Detect the SAME specific pin-pair remaining unconnected across
         # consecutive build_and_check_pcb calls -- a strong signal that

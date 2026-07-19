@@ -51,7 +51,18 @@ class LLMPCBClaudeClient:
                 anthropic_messages.append({"role": role, "content": content})
 
         kwargs = dict(
-            model=model, max_tokens=4096, system=system_prompt,
+            model=model, max_tokens=4096,
+            # NOTE: prompt caching (cache_control below) requires a
+            # minimum of 4,096 tokens for Haiku 4.5 specifically (higher
+            # than Sonnet/Opus's 1024-2048 minimum) -- verified via direct
+            # testing: SYSTEM_PROMPT is only ~1.5-2K tokens, so caching
+            # does NOT activate here (cache_creation_input_tokens stayed
+            # 0 across repeated identical calls). Left in place as a
+            # no-op safety net in case the prompt grows past 4096 tokens
+            # later, but the REAL cost lever for Claude right now is the
+            # tighter MAX_CONVERSATION_MESSAGES/MAX_ITERATIONS caps
+            # already applied above in orchestrator_minimal.py, not caching.
+            system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
             messages=anthropic_messages, temperature=temperature,
         )
         if tools:

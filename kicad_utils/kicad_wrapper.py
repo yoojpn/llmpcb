@@ -1560,10 +1560,43 @@ def build_and_simulate_schematic(skidl_code: str, output_name: str,
     call for the common case. `netlist` here is the raw SPICE netlist text
     (not the KiCad netlist file) to feed ngspice; if omitted, only the
     schematic step runs and spice is skipped (e.g. for ICs with no model).
+
+    Also runs the ZERO-LLM-COST deterministic wiring checks (shorted
+    2-pin parts, control-pin/bus conflicts, pin function mismatches,
+    USB-C CC pins) IMMEDIATELY here, right after the netlist exists --
+    not only later inside build_and_check_pcb after a full (often slow)
+    PCB placement+routing cycle. This directly addresses the core reason
+    a design needed dozens of loop iterations: wiring-level bugs were
+    only discovered one at a time, each requiring a full expensive
+    PCB-build round trip to surface, instead of getting ALL of them back
+    in the SAME turn as schematic generation, right when they're cheapest
+    and fastest to fix.
     """
     schematic_result = generate_schematic(skidl_code, output_name)
     if not schematic_result.get("success"):
         return {"schematic": schematic_result, "spice": None}
+
+    netlist_path = schematic_result.get("netlist_path")
+    wiring_issues = []
+    if netlist_path:
+        try:
+            for s in find_shorted_two_pin_parts(netlist_path):
+                wiring_issues.append(
+                    f"Component {s['ref']} ({s['part']}) has both pins on the same net "
+                    f"('{s['net']}') -- it is wired to do nothing, fix the SKiDL connections."
+                )
+        except Exception:
+            pass
+        try:
+            wiring_issues.extend([s["note"] for s in find_control_pin_bus_conflicts(netlist_path)])
+        except Exception:
+            pass
+        try:
+            wiring_issues.extend([s["note"] for s in find_unconnected_usb_c_cc_pins(netlist_path)])
+        except Exception:
+            pass
+    schematic_result["early_wiring_issues"] = wiring_issues or None
+
     spice_result = None
     if netlist:
         spice_result = run_spice_simulation(netlist, analysis_type, check_points)
