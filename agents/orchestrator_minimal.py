@@ -328,7 +328,19 @@ def _verify_against_datasheets(final_components: list[dict], nets_info: dict, cl
     findings = []
     for comp in final_components:
         ref, value = comp.get("ref", ""), comp.get("value", "")
-        if re.fullmatch(r"R|C|L|LED|Fuse|D", value or "") or not value:
+        # Skip simple passive VALUES (e.g. "5.1k", "100nF", "10uF") in
+        # addition to bare type names (e.g. "R") -- found via live
+        # testing: searching the web for a datasheet matching a generic
+        # value string like "5.1k" can return a COMPLETELY UNRELATED real
+        # part (e.g. a precision multi-turn potentiometer whose listing
+        # happens to mention "5.1k" or similar text), which the LLM then
+        # incorrectly treated as authoritative for this component,
+        # fabricating a nonexistent "potentiometer vs resistor mismatch"
+        # that didn't reflect the actual (correct) SKiDL code at all.
+        is_passive_value = bool(re.fullmatch(
+            r"R|C|L|LED|Fuse|D|[\d.]+[a-zA-ZΩ%]*", value or "", re.IGNORECASE
+        ))
+        if is_passive_value or not value:
             continue  # skip simple passives with no generic part number to look up
         try:
             search_result = research.search_footprint_library(value, "")
