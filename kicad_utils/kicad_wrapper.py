@@ -613,6 +613,8 @@ def _classify_pin_role(pin_name: str) -> str:
         return "spi"
     if re.fullmatch(r"EN|~?EN|CE|~?CE|~?CS\d?", n):
         return "enable_control"
+    if re.fullmatch(r"~?N?RESET|~?N?RST|~\{RST\}", n):
+        return "reset_control"
     if re.match(r"^IO\d+", n) or re.match(r"^GPIO\d*", n):
         return "gpio"
     if n in ("G", "GATE"):
@@ -631,7 +633,7 @@ def _classify_pin_role(pin_name: str) -> str:
 # regardless of which specific part types are involved (generalizes beyond
 # any single part family, unlike a per-part heuristic).
 _INCOMPATIBLE_CONTROL_SOURCE_ROLES = {"i2c_data", "i2c_clock", "uart_tx", "uart_rx", "spi"}
-_CONTROL_TARGET_ROLES = {"mosfet_gate", "enable_control"}
+_CONTROL_TARGET_ROLES = {"mosfet_gate", "enable_control", "reset_control"}
 
 
 def find_control_pin_bus_conflicts(netlist_path: str) -> list[dict]:
