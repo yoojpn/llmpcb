@@ -197,12 +197,36 @@ def search_footprint_library(part_number: str, manufacturer: str = "",
         fp_path, fp_ref = _canonicalize_footprint(
             local_result["footprint_file"], local_result.get("footprint_ref"), dest_dir, "KiCadOfficial"
         )
+        # Extract pin_names here too -- found via generating tool-call
+        # training data: this local-KiCad-cache path (hit for standard
+        # library parts like USB_A, CH340C, AMS1117-3.3) never populated
+        # pin_names at all, only the LCSC/easyeda2kicad path did. Every
+        # single tool-call example generated from real component lookups
+        # that hit this path had pin_names=null, silently missing the
+        # exact benefit (verified pin names to prevent guessing) this
+        # field was added for.
+        symbol_name = None
+        pin_names = None
+        sym_file = local_result.get("symbol_file")
+        if sym_file and os.path.exists(sym_file):
+            sym_text = Path(sym_file).read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r'\(symbol "([^"]+)"', sym_text)
+            if m:
+                symbol_name = m.group(1)
+            if symbol_name:
+                try:
+                    from kicad_utils.kicad_wrapper import _get_pin_names_for_part
+                    pin_names = _get_pin_names_for_part(symbol_name, Path(sym_file).parent.parent, lib_name=str(Path(sym_file).stem)) or None
+                except Exception:
+                    pin_names = None
         result = FootprintSearchResult(
             found=True,
             source=local_result["source"],
             symbol_file=local_result["symbol_file"],
+            symbol_name=symbol_name,
             footprint_file=fp_path,
             footprint_ref=fp_ref,
+            pin_names=pin_names,
         ).__dict__
         _log_tool_call("search_footprint_library", {"part_number": part_number}, result)
         return result
